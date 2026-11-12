@@ -6,7 +6,7 @@ an action, fill in parameters when asked, then judge the result
 (pass/fail/skip). `b` goes back one level, `m` returns to the main
 menu, `q` quits; a summary is written to `/tmp/hwtest-report.txt`.
 
-The last main-menu entry "自动全检" runs an unattended sequence (WiFi
+The last main-menu entry "Auto full check" runs an unattended sequence (WiFi
 scan, BT scan, IMU, camera snapshot, ToF, speaker/mic loopback) while
 all face LEDs blink at 500ms and the fan sweeps low->high. It needs an
 audio file (default `/opt/microduck-test/hwtest/bbno.wav`); drop a

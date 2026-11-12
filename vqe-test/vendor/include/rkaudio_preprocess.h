@@ -405,15 +405,15 @@ extern "C" {
 		/*RKAGCParam* param = (RKAGCParam*)malloc(sizeof(RKAGCParam));*/
 		RKAGCParam* param = (RKAGCParam*)calloc(1, sizeof(RKAGCParam));
 
-		param->attack_time = 100.0;		/* 触发时间，即AGC增益上升所需要的时间 */
-		param->release_time = 200.0;	/* 施放时间，即AGC增益下降所需要的时间 */
-		//param->max_gain = 35.0;		/* 最大增益，同时也是线性段增益，单位：dB */
-		param->max_gain = 30;			/* 最大增益，同时也是线性段增益，单位：dB */
-		param->max_peak = -3.0;			/* 经AGC处理后，输出语音的最大能量，范围：单位：dB */
-		param->fRk0 = 2;				/* 扩张段斜率 */
-		param->fRth2 = -45;				/* 压缩段起始能量dB阈值，同时也是线性段结束阈值，增益逐渐降低，注意 fRth2 + max_gain < max_peak */
-		param->fRth1 = -60;				/* 扩张段结束能量dB阈值，同时也是线性段开始阈值，能量高于改区域以max_gain增益 */
-		param->fRth0 = -65;				/* 噪声门阈值 */
+		param->attack_time = 100.0;		/* attack time: time for AGC gain to rise */
+		param->release_time = 200.0;	/* release time: time for AGC gain to fall */
+		//param->max_gain = 35.0;		/* max gain, also the linear-region gain, in dB */
+		param->max_gain = 30;			/* max gain, also the linear-region gain, in dB */
+		param->max_peak = -3.0;			/* max output speech energy after AGC, in dB */
+		param->fRk0 = 2;				/* expander-region slope */
+		param->fRth2 = -45;				/* compressor start threshold in dB, also where the linear region ends and gain starts dropping; note fRth2 + max_gain < max_peak */
+		param->fRth1 = -60;				/* expander end threshold in dB, also where the linear region starts; above this region gain is max_gain */
+		param->fRth0 = -65;				/* noise gate threshold */
 
 		/* ÎÞÐ§²ÎÊý */
 		param->fs = 16000;                       /* Êý¾Ý²ÉÑùÂÊ */

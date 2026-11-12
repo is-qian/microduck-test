@@ -1,49 +1,63 @@
-# vqe-test — facemic PDM 麦 VQE(ANR+AGC)处理链
+# vqe-test — facemic PDM mic VQE (ANR+AGC) processing chain
 
-SDK(`librkaudio_vqe`)在 microduck 板(RK3566)上的可运行封装。链路无硬件增益
-(见 `../facemic-gain/`),VQE 提供 ANR 降噪 + AGC 自动增益的动态语音前端,
-适合喂 ASR/对讲;与 softvol 固定增益二选一,VQE 输入必须取原始流
-(`-D hw:facemic,0`),不要叠 softvol。
+A runnable wrapper of the SDK (`librkaudio_vqe`) on the microduck board
+(RK3566). The link has no hardware gain (see `../facemic-gain/`); VQE
+provides an ANR denoise + AGC dynamic voice front end, suitable for
+feeding ASR/intercom; pick either this or the fixed softvol gain. VQE
+input must be the raw stream (`-D hw:facemic,0`) — do not stack softvol
+on top.
 
-仓库只放源码(Rust,零外部 crate);`install.sh <dir>` 由 `../build-dist.sh`/CI
-调用,交叉编译并把自包含 payload(bin + so + 配置 + wrapper)装进 dist,板上
-位于 `/opt/microduck-test/vqe-test/`,解包即用。闭源库 vendor 在 `vendor/`
-(与 `nfc/rfal` 同样的做法),CI 无需 SDK;需要换库版本时 `SDK=` 指向完整
-SDK 构建即可。
+Only sources are committed (Rust, zero external crates); `install.sh
+<dir>` is called by `../build-dist.sh`/CI, cross-builds and packs the
+self-contained payload (bin + so + config + wrapper) into the dist — on
+the board it lives at `/opt/microduck-test/vqe-test/`, ready after
+unpacking. The closed-source library is vendored in `vendor/` (same
+approach as `nfc/rfal`), so CI needs no SDK; to change library versions,
+point `SDK=` at a full SDK build.
 
-构建说明:与 hwtest 的 musl 静态不同,本工具用 `aarch64-unknown-linux-gnu`
-动态链接——闭源 `librkaudio_vqe.so` 是 glibc 构建,musl 静态二进制无法加载它。
-Rust 生成的 glibc 符号需求实测最高 2.34(板 2.36,兼容)。
+Build note: unlike hwtest's musl static build, this tool uses
+`aarch64-unknown-linux-gnu` dynamic linking — the closed-source
+`librkaudio_vqe.so` is a glibc build that a musl static binary cannot
+load. The highest glibc symbol requirement produced by Rust measured
+2.34 (board has 2.36, compatible).
 
-## 已知坑(2026-10-29 验证结论)
+## Known Pitfalls (verification conclusions, 2026-10-29)
 
-- `librkaudio_common.so` 读 `/proc/device-tree/compatible` 做芯片白名单,只认
-  `rockchip,rv1126b`——rk3566 被拒。wrapper 用 `mount --bind` 临时伪造,
-  退出自动恢复;正式产品化前应向 RK/Seeed 确认支持 rk3566 的库版本
-- **必须走 `rkaudio_preprocess_init_by_conf(json)`**:手写 `RKAUDIOParam` 的
-  `init()` 在这版库上静默输出全零(程序保留 flags 数字参数作对照调试)
-- 帧参数:256 样点/帧@16k(16ms),2ch interleaved,`preprocess_short` 第 4
-  参传 512(shorts);SDK asr demo 源码传字节,与官方 PDF 文档矛盾,以文档为准。
-  返回值是字节数(每帧 512 字节 = 256 shorts,板上实测)
-- 输入要求:16k mono S16 wav;程序内部复制成 2ch 喂库
+- `librkaudio_common.so` reads `/proc/device-tree/compatible` against a
+  chip whitelist that only accepts `rockchip,rv1126b` — rk3566 is
+  rejected. The wrapper fakes it transiently with `mount --bind`,
+  restored automatically on exit; before productionizing, confirm a
+  library version supporting rk3566 with RK/Seeed
+- **Must go through `rkaudio_preprocess_init_by_conf(json)`**: calling
+  `init()` with a hand-written `RKAUDIOParam` silently outputs all zeros
+  on this library build (the program keeps the numeric flags parameter
+  for side-by-side debugging)
+- Frame parameters: 256 samples/frame @16k (16ms), 2ch interleaved; the
+  4th argument of `preprocess_short` is 512 (shorts); the SDK asr demo
+  sources pass bytes, contradicting the official PDF docs — trust the
+  docs. The return value is a byte count (512 bytes per frame = 256
+  shorts, measured on board)
+- Input requirement: 16k mono S16 wav; the program duplicates it to 2ch
+  internally before feeding the library
 
-## 板上使用(/opt/microduck-test/vqe-test/)
+## On-Board Usage (/opt/microduck-test/vqe-test/)
 
-### 实时(推荐)
+### Live (recommended)
 
 ```sh
-sudo /opt/microduck-test/vqe-test/vqe-live /tmp/raw.wav /tmp/out.wav [秒数,默认10]
+sudo /opt/microduck-test/vqe-test/vqe-live /tmp/raw.wav /tmp/out.wav [seconds, default 10]
 ```
 
-facemic 原始流采集(hw:facemic,不走 softvol)→ 逐帧 VQE → 落盘两份 mono
-S16(原始对照 + 处理后),运行中每秒打印 in/out 实时电平。语音服务集成时,
-`vqe_live.c` 的 stdin 循环就是参考模板(SDK `app/lvgl_demo/rk_demo/asr/audio.c`
-是带唤醒词的完整版)。
+Captures the facemic raw stream (hw:facemic, no softvol) → VQE frame by
+frame → writes two mono S16 files (raw reference + processed), printing
+live in/out levels every second. When integrating a voice service, the
+stdin loop in `vqe_live.c` is the reference template (the SDK's
+`app/lvgl_demo/rk_demo/asr/audio.c` is the full version with wake word).
 
-### 离线
+### Offline
 
 ```sh
-# 录原始流(S32 2ch)并转 16k mono S16:
+# Record the raw stream (S32 2ch) and convert to 16k mono S16:
 sudo arecord -D hw:facemic,0 -f S32_LE -r 16000 -c 2 -d 8 /tmp/r.wav
 python3 -c "
 import wave, array
@@ -56,11 +70,13 @@ wo.writeframes(o.tobytes()); wo.close()"
 sudo /opt/microduck-test/vqe-test/vqe-test /tmp/in.wav /tmp/out.wav
 ```
 
-预期:纯底噪段输出 rms 下降(ANR),语音/瞬态段上升(AGC)。参考(环境音):
-rms 82.5 → 260.5(+10dB);纯底噪:72.3 → 15.2(-13.5dB)。
+Expected: pure-noise segments drop in output rms (ANR), speech/transient
+segments rise (AGC). Reference (ambient sound): rms 82.5 → 260.5
+(+10dB); pure noise floor: 72.3 → 15.2 (−13.5dB).
 
 ## config_mic.json
 
-由 SDK `rkaudio_algorithms/conf/config_aivqe.json` 生成:所有模块
-`status` 置 disable,仅保留 `bf`/`agc`/`anr` enable(参数模板默认)。
-AEC/wakeup/AINR 未启用(后者需 NPU rknn 模型)。
+Generated from the SDK's `rkaudio_algorithms/conf/config_aivqe.json`:
+every module `status` set to disable, keeping only `bf`/`agc`/`anr`
+enabled (default parameter templates). AEC/wakeup/AINR are not enabled
+(the latter needs an NPU rknn model).

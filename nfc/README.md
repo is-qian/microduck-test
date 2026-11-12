@@ -48,23 +48,26 @@ sudo /opt/microduck-test/nfc/nfc-test poll 8000
 sudo NFC_ANT=2 /opt/microduck-test/nfc/nfc-test nfcv read 0
 ```
 
-## RSE / EMC 测试
+## RSE / EMC Testing
 
-暗室测量时让 NFC 处于持续发射状态，两种模式：
+For chamber measurements keep the NFC side transmitting continuously —
+two modes:
 
 ```sh
-# 1. 纯载波（未调制 13.56 MHz CW）——测载波/杂散基准
+# 1. Pure carrier (unmodulated 13.56 MHz CW) — carrier/spurious baseline
 sudo /opt/microduck-test/nfc/nfc-test carrier
 
-# 2. 调制发射（最坏情况正常工作）——持续轮询发 REQA/REQB/INVENTORY
+# 2. Modulated transmit (worst-case normal operation) — continuous polling emitting REQA/REQB/INVENTORY
 sudo /opt/microduck-test/nfc/nfc-test poll 3600000
 ```
 
-- 实验室在此期间用磁场环天线（9 kHz–30 MHz，13.56 MHz 基波及近端杂散）
-  和电场天线（30 MHz 以上）分别扫描
-- 两种天线接口都要测：默认差分（双 RFO），`NFC_ANT=1`/`NFC_ANT=2`
-  强制单端 RFO1/RFO2
-- 结束直接 Ctrl-C 并断电/重启恢复，无驱动状态残留
+- During this the lab scans with a magnetic-field loop antenna
+  (9 kHz–30 MHz, 13.56 MHz fundamental and near spurious) and an
+  electric-field antenna (above 30 MHz) separately
+- Test both antenna interfaces: default differential (both RFOs);
+  `NFC_ANT=1`/`NFC_ANT=2` force single-ended RFO1/RFO2
+- Finish with Ctrl-C and a power cycle/reboot; no driver state is left
+  behind
 
 ## ESL e-ink tag (FMSC_E701_CA, 1.54" six-color 240x240)
 
@@ -84,7 +87,7 @@ sudo NFC_ANT=2 /opt/microduck-test/nfc/nfc-test write          # built-in 6-colo
   flashed instead.
 - Pixels are quantized to the six panel colors with Atkinson
   dithering by default (the vendor iOS app's default mode). Plain
-  nearest-color ("色阶" mode) via `NFC_DITHER=none`, Android-SDK
+  nearest-color ("posterize" mode) via `NFC_DITHER=none`, Android-SDK
   Floyd-Steinberg via `NFC_DITHER=fs`.
 - `write` prints the transfer rate per plane plus a total
   (`transfer total: 28800 bytes in ... = ... kB/s`); ~7.5 kB/s
@@ -105,7 +108,7 @@ sudo NFC_ANT=2 /opt/microduck-test/nfc/nfc-test write          # built-in 6-colo
 | Variable | Default | Effect |
 |---|---|---|
 | `NFC_ANT` | differential | `1` = single-ended RFO1 (J30), `2` = single-ended RFO2 (J31) |
-| `NFC_DITHER` | `atkinson` | `none` = plain nearest-color (色阶), `fs` = Floyd-Steinberg (Android SDK) |
+| `NFC_DITHER` | `atkinson` | `none` = plain nearest-color (posterize), `fs` = Floyd-Steinberg (Android SDK) |
 | `NFC_BLUR` | off | Box-blur radius before quantizing; use `1`-`2` for camera-captured photos (pixel-grid/moire noise otherwise washes colors out) |
 | `NFC_D2_DELAY_MS` | off | Delay between image packets; lets the tag capacitor recharge. On any >150 ms packet the pace auto-doubles (up to 50 ms) |
 | `NFC_PRECHARGE_MS` | off | Extra field-on delay before the image burst (helps when writing right after a refresh) |

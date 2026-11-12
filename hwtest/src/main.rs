@@ -40,8 +40,8 @@ struct Menu {
 // ---------------------------------------------------------------- 1. SoC / CPU
 
 static SOC_FREQ: Action = Action {
-    title: "变频检查",
-    expect: "4 核；可用频率 408000~1800000 共 7 档；满载后 scaling_cur_freq 升至 1800000",
+    title: "DVFS check",
+    expect: "4 cores; scaling_available_frequencies lists 408000~1800000 across 7 steps; scaling_cur_freq reaches 1800000 under load",
     manual: "",
     params: &[],
     cmds: &[
@@ -52,11 +52,11 @@ static SOC_FREQ: Action = Action {
     ],
 };
 
-// ------------------------------------------------------------------ 2. 内存
+// ------------------------------------------------------------------ 2. Memory
 
 static MEM_INFO: Action = Action {
-    title: "容量检查",
-    expect: "Mem total 约 963Mi（1GB 颗粒）",
+    title: "Capacity check",
+    expect: "Mem total ~963Mi (1GB die)",
     manual: "",
     params: &[],
     cmds: &["free -h"],
@@ -65,8 +65,8 @@ static MEM_INFO: Action = Action {
 // ------------------------------------------------------------------ 3. eMMC
 
 static EMMC_INFO: Action = Action {
-    title: "容量 / 型号",
-    expect: "mmcblk0 容量约 58G（64GB 颗粒）",
+    title: "Capacity / model",
+    expect: "mmcblk0 capacity ~58G (64GB die)",
     manual: "",
     params: &[],
     cmds: &[
@@ -76,10 +76,10 @@ static EMMC_INFO: Action = Action {
 };
 
 static EMMC_READ: Action = Action {
-    title: "读取测速",
-    expect: "直接读取速度不低于 80 MB/s",
+    title: "Read speed test",
+    expect: "Direct-read speed at least 80 MB/s",
     manual: "",
-    params: &[Param::Text { prompt: "读取大小 (MB)", default: "256" }],
+    params: &[Param::Text { prompt: "Read size (MB)", default: "256" }],
     cmds: &["dd if=/dev/mmcblk0 of=/dev/null bs=1M count={0} iflag=direct"],
 };
 
@@ -91,10 +91,10 @@ static EMMC_MENU: Menu = Menu {
 // ------------------------------------------------------------------ 4. PMIC
 
 static PMIC: Action = Action {
-    title: "电源轨核查",
-    expect: "i2c-0 上 0x20(RK809)/0x41(RK860) 显示 UU；vdd_cpu 0.9~1.0V、vdd_logic 0.875V、\
-             vdd_gpu/vdd_npu 0.9V、vcc_ddr 0.5V、vcc_1v8/vcca_1v8 1.8V、vccio_sd 3.3V、\
-             cam_1v2 1.2V、cam_2v8 2.8V",
+    title: "Power rail check",
+    expect: "0x20(RK809)/0x41(RK860) show UU on i2c-0; vdd_cpu 0.9~1.0V, vdd_logic 0.875V, \
+             vdd_gpu/vdd_npu 0.9V, vcc_ddr 0.5V, vcc_1v8/vcca_1v8 1.8V, vccio_sd 3.3V, \
+             cam_1v2 1.2V, cam_2v8 2.8V",
     manual: "",
     params: &[],
     cmds: &[
@@ -105,10 +105,10 @@ static PMIC: Action = Action {
     ],
 };
 
-// --------------------------------------------------------------- 5. 电源输入
+// --------------------------------------------------------------- 5. Power input
 
 static POWER_IN: Action = Action {
-    title: "输入级电压",
+    title: "Input stage voltages",
     expect: "vcc5v0_sys=5000000，vcc3v3_sys=3300000",
     manual: "",
     params: &[],
@@ -123,28 +123,28 @@ static POWER_IN: Action = Action {
 // --------------------------------------------------------------------- RTC
 
 static RTC: Action = Action {
-    title: "RTC 时间一致性",
-    expect: "hwclock 与 date 时间一致（误差 < 1s）",
+    title: "RTC time consistency",
+    expect: "hwclock and date agree (within < 1s)",
     manual: "",
     params: &[],
     cmds: &["sudo hwclock --systohc && sudo hwclock --show && date"],
 };
 
-// ------------------------------------------------------------ 7. 温度 / 压测
+// ------------------------------------------------------------ 7. Temperature / stress
 
 static TEMP_NOW: Action = Action {
-    title: "当前温度",
-    expect: "输出为毫摄氏度（如 45000 = 45°C）",
+    title: "Current temperature",
+    expect: "Output is millidegrees C (e.g. 45000 = 45C)",
     manual: "",
     params: &[],
     cmds: &["cat /sys/class/thermal/thermal_zone0/temp /sys/class/thermal/thermal_zone1/temp"],
 };
 
 static CPU_STRESS: Action = Action {
-    title: "CPU 满载压测",
-    expect: "stress-ng 报 successful run completed；满载 SoC 温度 ≤80°C，频率 ≥1.4GHz",
+    title: "CPU full-load stress",
+    expect: "stress-ng reports successful run completed; under load SoC temp <=80C, freq >=1.4GHz",
     manual: "",
-    params: &[Param::Text { prompt: "压测时长 (秒)", default: "30" }],
+    params: &[Param::Text { prompt: "Stress duration (s)", default: "30" }],
     cmds: &[
         "cat /sys/class/thermal/thermal_zone0/temp",
         "sudo stress-ng --cpu 4 --timeout {0}",
@@ -154,23 +154,23 @@ static CPU_STRESS: Action = Action {
 };
 
 static THERMAL_MENU: Menu = Menu {
-    title: "温度与压测",
+    title: "Temperature & stress",
     items: &[Node::Action(&TEMP_NOW), Node::Action(&CPU_STRESS)],
 };
 
 // -------------------------------------------------------------------- WiFi
 
 static WIFI_STATUS: Action = Action {
-    title: "连接状态",
-    expect: "已连接时显示 SSID、信号优于 -70dBm、tx/rx bitrate 百兆级（HE）",
+    title: "Connection status",
+    expect: "When connected shows SSID, signal better than -70dBm, tx/rx bitrate in the hundreds of Mbps (HE)",
     manual: "",
     params: &[],
     cmds: &["sudo iw dev wlan0 link"],
 };
 
 static WIFI_SCAN: Action = Action {
-    title: "扫描热点",
-    expect: "能列出周边热点及信号强度",
+    title: "Scan for APs",
+    expect: "Lists surrounding APs with signal strength",
     manual: "",
     params: &[],
     // "| cat": nmcli pages through less when stdout is a tty
@@ -178,30 +178,30 @@ static WIFI_SCAN: Action = Action {
 };
 
 static WIFI_CONNECT: Action = Action {
-    title: "连接热点",
-    expect: "报 successfully activated；之后可用 ping 测试验证",
+    title: "Connect to an AP",
+    expect: "Reports successfully activated; verify afterwards with the ping test",
     manual: "",
     params: &[
         Param::Text { prompt: "SSID", default: "" },
-        Param::Text { prompt: "密码", default: "" },
+        Param::Text { prompt: "Password", default: "" },
     ],
     cmds: &[r#"sudo nmcli dev wifi connect "{0}" password "{1}""#],
 };
 
 static WIFI_DISCONNECT: Action = Action {
-    title: "断开连接",
-    // device disconnect（而非 con down）会阻止 NM 自动重连，便于重复测试连接流程
-    expect: "报 successfully disconnected；连接状态变为 disconnected",
+    title: "Disconnect",
+    // device disconnect (rather than con down) stops NetworkManager from auto-reconnecting, handy for repeating the connect flow
+    expect: "Reports successfully disconnected; connection status becomes disconnected",
     manual: "",
     params: &[],
     cmds: &["sudo nmcli dev disconnect wlan0"],
 };
 
 static WIFI_PING: Action = Action {
-    title: "Ping 测试",
-    expect: "0% 丢包",
+    title: "Ping test",
+    expect: "0% packet loss",
     manual: "",
-    params: &[Param::Text { prompt: "目标地址", default: "one.one.one.one" }],
+    params: &[Param::Text { prompt: "Target address", default: "one.one.one.one" }],
     cmds: &["ping -c4 {0}"],
 };
 
@@ -216,10 +216,10 @@ static WIFI_MENU: Menu = Menu {
     ],
 };
 
-// -------------------------------------------------------------------- 蓝牙
+// -------------------------------------------------------------------- Bluetooth
 
 static BT_STATUS: Action = Action {
-    title: "控制器状态",
+    title: "Controller status",
     expect: "hci0 UP RUNNING，Bus: UART",
     manual: "",
     params: &[],
@@ -227,19 +227,19 @@ static BT_STATUS: Action = Action {
 };
 
 static BT_SCAN: Action = Action {
-    title: "扫描设备",
-    expect: "能发现周边 BLE/BT 设备",
+    title: "Scan for devices",
+    expect: "Discovers nearby BLE/BT devices",
     manual: "",
-    params: &[Param::Text { prompt: "扫描时长 (秒)", default: "6" }],
+    params: &[Param::Text { prompt: "Scan duration (s)", default: "6" }],
     cmds: &["sudo bluetoothctl --timeout {0} scan on"],
 };
 
 static BT_PAD: Action = Action {
-    title: "手柄连接与按键",
-    expect: "选中手柄后配对连接成功，出现输入设备节点；按键/摇杆事件持续打印",
-    manual: "先让手柄进入配对模式；选中设备后自动配对/连接并打印按键事件，\
-             手柄断连或 Ctrl-C 结束",
-    params: &[Param::Text { prompt: "扫描时长 (秒)", default: "8" }],
+    title: "Gamepad connection and buttons",
+    expect: "After selecting a gamepad it pairs and connects and an input device node appears; button/stick events print continuously",
+    manual: "Put the gamepad into pairing mode first; after a device is selected it auto-pairs/connects and prints button events, \
+             ends when the pad disconnects or on Ctrl-C",
+    params: &[Param::Text { prompt: "Scan duration (s)", default: "8" }],
     cmds: &[BT_PAD_CMD],
 };
 
@@ -257,33 +257,33 @@ for i in 1 2 3 4 5; do
     bluetoothctl power on > /dev/null 2>&1 && break
     sleep 1
 done
-echo "扫描中（{0} 秒）..."
+echo "Scanning ({0}s)..."
 bluetoothctl --timeout {0} scan on > /dev/null 2>&1
 mapfile -t devs < <(bluetoothctl devices | grep -iE 'controller|gamepad|xbox|8bitdo|joy-con|dualshock|dualsense')
 if [ ${#devs[@]} -eq 0 ]; then
-    echo "没有发现手柄类设备，列出全部已命名设备："
+    echo "No gamepad-like devices found; listing all named devices:"
     mapfile -t devs < <(bluetoothctl devices | awk '{print $2, $3}' | grep -vE '^([0-9A-Fa-f:]{17}) ([0-9A-Fa-f]{2}-){5}')
 fi
 if [ ${#devs[@]} -eq 0 ]; then
-    echo "没有发现任何设备，确认手柄处于配对模式后重试"
+    echo "No devices found; confirm the gamepad is in pairing mode and retry"
     exit 1
 fi
 i=1
 for d in "${devs[@]}"; do echo "  $i) $d"; i=$((i+1)); done
-read -rp "选择手柄编号: " n < /dev/tty
+read -rp "Select gamepad number: " n < /dev/tty
 sel=${devs[$((n-1))]}
-[ -z "$sel" ] && { echo "编号无效"; exit 1; }
+[ -z "$sel" ] && { echo "Invalid number"; exit 1; }
 MAC=$(echo "$sel" | awk '{print $2}' | grep -oE '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}')
-echo "选中: $MAC"
+echo "Selected: $MAC"
 bluetoothctl pair "$MAC" || true
 bluetoothctl trust "$MAC" > /dev/null
 if ! bluetoothctl connect "$MAC"; then
-    echo "连接失败，清除旧配对后重试（请保持手柄处于配对模式）"
+    echo "Connect failed; clearing the old pairing and retrying (keep the gamepad in pairing mode)"
     bluetoothctl remove "$MAC" > /dev/null
     bluetoothctl --timeout {0} scan on > /dev/null 2>&1
-    bluetoothctl pair "$MAC" || { echo "重新配对失败"; exit 1; }
+    bluetoothctl pair "$MAC" || { echo "Re-pairing failed"; exit 1; }
     bluetoothctl trust "$MAC" > /dev/null
-    bluetoothctl connect "$MAC" || { echo "连接失败"; exit 1; }
+    bluetoothctl connect "$MAC" || { echo "Connect failed"; exit 1; }
 fi
 ev=""
 for i in $(seq 1 10); do
@@ -295,22 +295,22 @@ for i in $(seq 1 10); do
     done
     sleep 1
 done
-[ -z "$ev" ] && { echo "未找到手柄输入设备（HID 连接失败）"; exit 1; }
-echo "输入设备: $ev ($(cat /sys/class/input/"$(basename "$ev")"/device/name))"
-echo "按手柄按键查看事件，手柄断连或 Ctrl-C 结束"
+[ -z "$ev" ] && { echo "Gamepad input device not found (HID connection failed)"; exit 1; }
+echo "Input device: $ev ($(cat /sys/class/input/"$(basename "$ev")"/device/name))"
+echo "Press gamepad buttons to see events; ends when the pad disconnects or on Ctrl-C"
 evtest "$ev"
 EOS"#;
 
 static BT_MENU: Menu = Menu {
-    title: "蓝牙",
+    title: "Bluetooth",
     items: &[Node::Action(&BT_STATUS), Node::Action(&BT_SCAN), Node::Action(&BT_PAD)],
 };
 
 // --------------------------------------------------------------- USB-C OTG
 
 static OTG: Action = Action {
-    title: "OTG gadget 状态",
-    expect: "state=configured（已连主机）；gadget 目录存在 rockchip",
+    title: "OTG gadget status",
+    expect: "state=configured (host attached); the gadget dir contains rockchip",
     manual: "",
     params: &[],
     cmds: &[
@@ -319,15 +319,15 @@ static OTG: Action = Action {
     ],
 };
 
-// -------------------------------------------------------------------- 音频
+// -------------------------------------------------------------------- Audio
 
 static SPK_PLAY: Action = Action {
-    title: "喇叭播放",
-    expect: "aplay -l 有 card 0: rockchip,rk809-codec；播放无报错，喇叭可听到提示音",
+    title: "Speaker playback",
+    expect: "aplay -l lists card 0: rockchip,rk809-codec; playback without errors, audible tone from the speaker",
     manual: "",
     params: &[
-        Param::Text { prompt: "频率 (Hz)", default: "880" },
-        Param::Text { prompt: "时长 (秒)", default: "2" },
+        Param::Text { prompt: "Frequency (Hz)", default: "880" },
+        Param::Text { prompt: "Duration (s)", default: "2" },
     ],
     cmds: &[
         "aplay -l",
@@ -339,12 +339,12 @@ static SPK_PLAY: Action = Action {
 };
 
 static MIC_REC: Action = Action {
-    title: "PDM 麦克风录音",
-    expect: "录满无报错；样本峰值非零（softvol +20dB 后约 1e8~1e9）",
-    manual: "-D mic 走 softvol 固定增益，需先部署 alsa-config（完整镜像已内置）；\
-             PDM 控制器最少 2 通道，必须 -c 2；没有 facemic 时检查 lsmod | grep dmic，\
-             必要时 sudo modprobe snd-soc-dmic",
-    params: &[Param::Text { prompt: "录音时长 (秒)", default: "3" }],
+    title: "PDM microphone recording",
+    expect: "Records fully without errors; non-zero sample peak (~1e8-1e9 after softvol +20dB)",
+    manual: "-D mic goes through the fixed softvol gain; deploy alsa-config first (already in the full image); \
+             the PDM controller needs at least 2 channels, so -c 2 is mandatory; without facemic check lsmod | grep dmic, \
+             and sudo modprobe snd-soc-dmic if needed",
+    params: &[Param::Text { prompt: "Recording duration (s)", default: "3" }],
     cmds: &[
         "arecord -l",
         "sudo arecord -D mic -f S32_LE -r 16000 -c 2 -d {0} /tmp/mic-test.wav",
@@ -353,41 +353,41 @@ static MIC_REC: Action = Action {
 };
 
 static AUDIO_MENU: Menu = Menu {
-    title: "音频",
+    title: "Audio",
     items: &[Node::Action(&SPK_PLAY), Node::Action(&MIC_REC), Node::Action(&AUDIO_LOOPBACK)],
 };
 
 // Runs via dispatch (custom flow + Rust-side comparison), not the generic runner.
 static AUDIO_LOOPBACK: Action = Action {
-    title: "音频回路（播放→录音→对比→回放）",
+    title: "Audio loopback (play->record->compare->playback)",
     expect: "",
-    manual: "播放选中音频的同时录音，对比相似度后回放录音",
+    manual: "Records while playing the selected audio, compares similarity, then plays the recording back",
     params: &[
         Param::Choice {
-            prompt: "播放音频",
-            options: &[("测试音频 bbno.wav", ""), ("自定义路径", "custom")],
+            prompt: "Audio to play",
+            options: &[("Test audio bbno.wav", ""), ("Custom path", "custom")],
         },
-        Param::TextOptional { prompt: "自定义音频路径（选测试音频直接回车）", default: "" },
-        Param::Text { prompt: "播放/录音时长 (秒)", default: "10" },
+        Param::TextOptional { prompt: "Custom audio path (press Enter directly for the test audio)", default: "" },
+        Param::Text { prompt: "Play/record duration (s)", default: "10" },
     ],
     cmds: &[],
 };
 
-// ------------------------------------------------------------------ 摄像头
+// ------------------------------------------------------------------ Camera
 
 static CAM_TOPO: Action = Action {
-    title: "拓扑检查",
-    expect: "media 拓扑中存在 gc2093 或 gc2613 实体（未插的那个报 -EBUSY 属预期）",
+    title: "Topology check",
+    expect: "media topology contains gc2093 and gc2613 entities (the unplugged one reporting -EBUSY is expected)",
     manual: "",
     params: &[],
     cmds: &["sudo media-ctl -d /dev/media0 -p | grep -E 'gc2093|gc2613'"],
 };
 
 static CAM_GRAB: Action = Action {
-    title: "抓取裸帧",
-    expect: "抓帧无丢失，文件大小 = 帧数 × 3110400 字节（NV12 1920x1080）",
-    manual: "rkaiq_3A_server 运行中（pgrep rkaiq_3A_server）时画面亮度/色彩自动收敛",
-    params: &[Param::Text { prompt: "帧数", default: "30" }],
+    title: "Grab raw frames",
+    expect: "No dropped frames; file size = frames x 3110400 bytes (NV12 1920x1080)",
+    manual: "With rkaiq_3A_server running (pgrep rkaiq_3A_server), brightness/color auto-converges",
+    params: &[Param::Text { prompt: "Frames", default: "30" }],
     cmds: &[
         "sudo v4l2-ctl -d /dev/video0 --stream-mmap=3 --stream-count={0} --stream-to=/tmp/f.raw",
         "ls -l /tmp/f.raw",
@@ -395,9 +395,9 @@ static CAM_GRAB: Action = Action {
 };
 
 static CAM_60FPS: Action = Action {
-    title: "60fps 切换验证",
-    expect: "120 帧完整（373248000 字节），实际帧率 ≥50fps；测完恢复 30fps",
-    manual: "必须在无数据流时设置",
+    title: "60fps switch verification",
+    expect: "120 frames complete (373248000 bytes), measured rate >=50fps; restored to 30fps afterwards",
+    manual: "Must be set with no active stream",
     params: &[],
     cmds: &[
         "SUBDEV=$(grep -l -E 'gc2093|gc2613' /sys/class/video4linux/v4l-subdev*/name | head -1 | xargs dirname | xargs basename); \
@@ -409,17 +409,17 @@ static CAM_60FPS: Action = Action {
 };
 
 static CAMERA_MENU: Menu = Menu {
-    title: "CSI 摄像头",
+    title: "CSI camera",
     items: &[Node::Action(&CAM_TOPO), Node::Action(&CAM_GRAB), Node::Action(&CAM_60FPS)],
 };
 
-// -------------------------------------------------------------- H.264 编码
+// -------------------------------------------------------------- H.264 encoding
 
 static H264_ENC: Action = Action {
-    title: "H.264 硬件编码",
-    expect: "编码成功，输出平均帧率（约 30fps），生成非空 /tmp/test.h264",
-    manual: "依赖摄像头抓帧生成的 /tmp/f.raw（NV12 1920x1080）",
-    params: &[Param::Text { prompt: "编码帧数", default: "30" }],
+    title: "H.264 hardware encoding",
+    expect: "Encoding succeeds, prints the average frame rate (~30fps), non-empty /tmp/test.h264 produced",
+    manual: "Depends on /tmp/f.raw from the camera grab (NV12 1920x1080)",
+    params: &[Param::Text { prompt: "Frames to encode", default: "30" }],
     cmds: &[
         "sudo mpi_enc_test -i /tmp/f.raw -w 1920 -h 1080 -f 0 -t 7 -o /tmp/test.h264 -n {0}",
     ],
@@ -428,9 +428,9 @@ static H264_ENC: Action = Action {
 // ------------------------------------------------------- GPU/VPU/RGA2/NPU
 
 static GPU_VPU: Action = Action {
-    title: "设备节点检查",
-    expect: "dri 有 card0/card1/renderD128/renderD129；/dev/mpp_service 存在；\
-             devfreq 含 dmc/npu/gpu/rkvenc/rkvdec；dmesg 有 rga2 probe successfully",
+    title: "Device node check",
+    expect: "dri has card0/card1/renderD128/renderD129; /dev/mpp_service exists; \
+             devfreq lists dmc/npu/gpu/rkvenc/rkvdec; dmesg shows rga2 probe successfully",
     manual: "",
     params: &[],
     cmds: &[
@@ -440,11 +440,11 @@ static GPU_VPU: Action = Action {
     ],
 };
 
-// ----------------------------------------------------------- HWRNG/看门狗
+// ----------------------------------------------------------- HWRNG/watchdog
 
 static HWRNG: Action = Action {
-    title: "HWRNG / 看门狗",
-    expect: "读出 16 字节随机数；/dev/watchdog0 存在",
+    title: "HWRNG / watchdog",
+    expect: "Reads 16 random bytes; /dev/watchdog0 exists",
     manual: "",
     params: &[],
     cmds: &[
@@ -456,8 +456,8 @@ static HWRNG: Action = Action {
 // ------------------------------------------------------------------ EEPROM
 
 static EEPROM: Action = Action {
-    title: "Board ID EEPROM（24C32, I2C1-0x50）",
-    expect: "0x50 显示 UU；sysfs 提供 4096 字节可读（出厂未烧录时全 0xFF）",
+    title: "Board ID EEPROM (24C32, I2C1-0x50)",
+    expect: "0x50 shows UU; sysfs exposes 4096 readable bytes (all 0xFF when left blank at the factory)",
     manual: "",
     params: &[],
     cmds: &[
@@ -469,8 +469,8 @@ static EEPROM: Action = Action {
 // ------------------------------------------------------------------- Qwiic
 
 static QWIIC: Action = Action {
-    title: "Qwiic 总线扫描（I2C3）",
-    expect: "Face 小板 V1.0 连接时 0x20(AW21009)/0x45(AW2023) 显示 UU，0x6a(IMU) 可见",
+    title: "Qwiic bus scan (I2C3)",
+    expect: "With the face board V1.0 attached, 0x20(AW21009)/0x45(AW2023) show UU and 0x6a(IMU) is visible",
     manual: "",
     params: &[],
     cmds: &["sudo i2cdetect -y 3"],
@@ -479,39 +479,39 @@ static QWIIC: Action = Action {
 // ---------------------------------------------------------------- Face LED
 
 static LED_LIST: Action = Action {
-    title: "LED 列表",
-    expect: "face:rgb:blue/green/red（AW2023）和 face:gr1/gr2/gb/green1/green2/cam（AW21009）共 12 个节点齐全",
+    title: "LED list",
+    expect: "All 12 nodes present: face:rgb:blue/green/red (AW2023) and face:gr1/gr2/gb/green1/green2/cam (AW21009)",
     manual: "",
     params: &[],
     cmds: &["ls /sys/class/leds/ | grep -E 'face'"],
 };
 
 static LED_ON: Action = Action {
-    title: "点亮 / 熄灭 LED",
-    expect: "对应灯点亮，回车后熄灭",
+    title: "Turn LED on / off",
+    expect: "The LED lights up; goes dark after Enter",
     manual: "",
-    params: &[Param::Text { prompt: "LED 名（见列表）", default: "face:rgb:red" }],
+    params: &[Param::Text { prompt: "LED name (see list)", default: "face:rgb:red" }],
     cmds: &[
         "echo 255 | sudo tee /sys/class/leds/{0}/brightness > /dev/null; \
-         read -p '{0} 应已点亮，确认后回车熄灭: ' -r; \
+         read -p '{0} should now be lit; press Enter to turn it off: ' -r; \
          echo 0 | sudo tee /sys/class/leds/{0}/brightness > /dev/null",
     ],
 };
 
 static LED_AW21009: Action = Action {
-    title: "点亮 / 熄灭 AW21009 LED",
-    expect: "对应灯点亮，回车后熄灭",
+    title: "Turn AW21009 LED on / off",
+    expect: "The LED lights up; goes dark after Enter",
     manual: "face:gr1:red face:gr1:green face:green2:green face:green1:green face:gb:green face:gb:blue face:gr2:green face:gr2:red face:cam:red",
-    params: &[Param::Text { prompt: "LED 名（见列表）", default: "face:cam:red" }],
+    params: &[Param::Text { prompt: "LED name (see list)", default: "face:cam:red" }],
     cmds: &[
         "echo 255 | sudo tee /sys/class/leds/{0}/brightness > /dev/null; \
-         read -p '{0} 应已点亮，确认后回车熄灭: ' -r; \
+         read -p '{0} should now be lit; press Enter to turn it off: ' -r; \
          echo 0 | sudo tee /sys/class/leds/{0}/brightness > /dev/null",
     ],
 };
 
 static LED_MENU: Menu = Menu {
-    title: "Face 小板 LED",
+    title: "Face board LED",
     items: &[
         Node::Action(&LED_LIST),
         Node::Action(&LED_ON),
@@ -530,9 +530,9 @@ static IMU_ID: Action = Action {
 };
 
 static IMU_READ: Action = Action {
-    title: "读取陀螺仪 + 加速度",
-    expect: "静止时加速度模长约 1g（0.061 mg/LSB），陀螺仪零偏接近 0（4.375 mdps/LSB）",
-    manual: "最后一步是测完关断，即使读数异常也应执行",
+    title: "Read gyroscope + accelerometer",
+    expect: "At rest the acceleration magnitude is ~1g (0.061 mg/LSB); gyro bias near 0 (4.375 mdps/LSB)",
+    manual: "The last step powers it down after reading; run it even if the readings look wrong",
     params: &[],
     cmds: &[
         "sudo i2cset -y 3 0x6a 0x12 0x01; sleep 0.1; \
@@ -545,22 +545,22 @@ static IMU_READ: Action = Action {
 };
 
 static IMU_MENU: Menu = Menu {
-    title: "Face 小板 IMU",
+    title: "Face board IMU",
     items: &[Node::Action(&IMU_ID), Node::Action(&IMU_READ)],
 };
 
 // --------------------------------------------------------------------- ToF
 
 static TOF: Action = Action {
-    title: "测距",
-    expect: "is_alive 通过（device_id=0xF0）；init 成功，测距矩阵连续出数，\
-             近处遮挡与背景距离对比清晰；末尾 data check 有效区域接近 N×N、\
-             无 mostly invalid 帧",
-    manual: "运行前后会自动 stop/start tofd，避免并发访问挂死传感器",
+    title: "Ranging",
+    expect: "is_alive passes (device_id=0xF0); init succeeds, the ranging matrix streams continuously, \
+             near occlusion vs background contrast is clear; at the end the data check shows nearly N×N valid zones, \
+             no mostly invalid frames",
+    manual: "Stops/starts tofd automatically before/after, to avoid concurrent access wedging the sensor",
     params: &[
-        Param::Text { prompt: "帧数", default: "20" },
+        Param::Text { prompt: "Frames", default: "20" },
         Param::Choice {
-            prompt: "分辨率",
+            prompt: "Resolution",
             options: &[("4x4", "4"), ("8x8", "8")],
         },
     ],
@@ -570,11 +570,11 @@ static TOF: Action = Action {
 };
 
 static TOF_FPS: Action = Action {
-    title: "帧率验证（4x4 @ 60Hz）",
-    expect: "frequency readback 为 60 Hz，实测约 58~60 fps，\
-             data check 有效区域 16/16、无 mostly invalid 帧",
-    manual: "60Hz 仅 4x4 支持（8x8 上限 15Hz）；运行前后会自动 stop/start tofd",
-    params: &[Param::Text { prompt: "帧数", default: "600" }],
+    title: "Frame rate verification (4x4 @ 60Hz)",
+    expect: "frequency readback is 60 Hz, measured ~58-60 fps, \
+             data check 16/16 valid zones, no mostly invalid frames",
+    manual: "60Hz is only available at 4x4 (8x8 caps at 15Hz); stops/starts tofd automatically before/after",
+    params: &[Param::Text { prompt: "Frames", default: "600" }],
     cmds: &["sudo systemctl stop tofd; \
              sudo /opt/microduck-test/tof/vl53l8cx-test /dev/spidev3.0 {0} 4 60; \
              sudo systemctl start tofd"],
@@ -583,99 +583,99 @@ static TOF_FPS: Action = Action {
 // --------------------------------------------------------------------- NFC
 
 static ANT_OPTS: &[(&str, &str)] = &[
-    ("差分（双天线，默认）", ""),
-    ("NFC1 单端（RFO1 = J30）", "NFC_ANT=1"),
-    ("NFC2 单端（RFO2 = J31）", "NFC_ANT=2"),
+    ("Differential (both antennas, default)", ""),
+    ("NFC1 single-ended (RFO1 = J30)", "NFC_ANT=1"),
+    ("NFC2 single-ended (RFO2 = J31)", "NFC_ANT=2"),
 ];
 
 static NFC_ID: Action = Action {
-    title: "冒烟测试（IC_ID）",
-    expect: "IC_ID = 0xA9，退出码 0",
+    title: "Smoke test (IC_ID)",
+    expect: "IC_ID = 0xA9, exit code 0",
     manual: "",
     params: &[],
     cmds: &["sudo /opt/microduck-test/nfc/nfc-id-test"],
 };
 
 static NFC_REGS: Action = Action {
-    title: "寄存器核查",
-    expect: "GENERAL[0x01]=0x0C（差分双 RFO）、REGULATOR[0x02]=0x5F、TX_DRIVER[0x03]=0x00",
+    title: "Register check",
+    expect: "GENERAL[0x01]=0x0C (differential, both RFOs), REGULATOR[0x02]=0x5F, TX_DRIVER[0x03]=0x00",
     manual: "",
     params: &[],
     cmds: &["sudo /opt/microduck-test/nfc/nfc-test regs"],
 };
 
 static NFC_FIELD: Action = Action {
-    title: "场强观测",
-    expect: "空载 I 稳定在 75-80；卡片贴近天线后 I/Q 明显变化，移开恢复",
-    manual: "1 次/秒持续输出，Ctrl-C 停止",
+    title: "Field strength readout",
+    expect: "Unloaded I steady at 75-80; with a card near the antenna I/Q shifts clearly and recovers when moved away",
+    manual: "Prints once per second; Ctrl-C to stop",
     params: &[],
     cmds: &["sudo /opt/microduck-test/nfc/nfc-test field"],
 };
 
 static NFC_POLL: Action = Action {
-    title: "整卡轮询",
-    expect: "标签贴在哪路，对应单端命令就能发现并报出卡 UID（E00223 开头）；\
-             贴 J30 时 NFC_ANT=2 应报 no tag found，反之亦然",
-    manual: "用 NFC_ANT 切单端可逐路验证天线，确认无串扰错位",
+    title: "Full tag polling",
+    expect: "A tag on either antenna is found by that side's single-ended command, which reports the card UID (starts with E00223); \
+             with the tag on J30, NFC_ANT=2 should report no tag found, and vice versa",
+    manual: "Switching single-ended via NFC_ANT verifies each antenna path and rules out crosstalk/miswiring",
     params: &[
-        Param::Choice { prompt: "天线", options: ANT_OPTS },
-        Param::Text { prompt: "轮询时长 (ms)", default: "8000" },
+        Param::Choice { prompt: "Antenna", options: ANT_OPTS },
+        Param::Text { prompt: "Poll duration (ms)", default: "8000" },
     ],
     cmds: &["sudo {0} /opt/microduck-test/nfc/nfc-test poll {1}"],
 };
 
 static NFC_READ: Action = Action {
-    title: "读块（ISO15693）",
-    expect: "先打印卡 UID（E00223 开头），随后输出 4 字节块数据",
+    title: "Read block (ISO15693)",
+    expect: "Prints the card UID first (starts with E00223), then the 4-byte block data",
     manual: "",
     params: &[
-        Param::Choice { prompt: "天线", options: ANT_OPTS },
-        Param::Text { prompt: "块号", default: "0" },
+        Param::Choice { prompt: "Antenna", options: ANT_OPTS },
+        Param::Text { prompt: "Block number", default: "0" },
     ],
     cmds: &["sudo {0} /opt/microduck-test/nfc/nfc-test nfcv read {1}"],
 };
 
 static NFC_WRITE_VERIFY: Action = Action {
-    title: "写块（写回校验，非破坏性）",
-    expect: "输出 WRITE PASS（写后回读一致），退出码 0",
-    manual: "读出原数据写回并校验；若报协议错误且读正常，多为该块已被卡片锁定",
+    title: "Write block (write-back verify, non-destructive)",
+    expect: "Prints WRITE PASS (readback matches after write), exit code 0",
+    manual: "Reads the original data, writes it back and verifies; a protocol error with working reads usually means the block is locked on the card",
     params: &[
-        Param::Choice { prompt: "天线", options: ANT_OPTS },
-        Param::Text { prompt: "块号", default: "1" },
+        Param::Choice { prompt: "Antenna", options: ANT_OPTS },
+        Param::Text { prompt: "Block number", default: "1" },
     ],
     cmds: &["sudo {0} /opt/microduck-test/nfc/nfc-test nfcv write {1}"],
 };
 
 static NFC_WRITE_DATA: Action = Action {
-    title: "写块（指定数据）",
-    expect: "输出 WRITE PASS（写后回读一致），退出码 0",
-    manual: "破坏性写入，确认块用途后再执行",
+    title: "Write block (specific data)",
+    expect: "Prints WRITE PASS (readback matches after write), exit code 0",
+    manual: "Destructive write; confirm what the block is used for before running",
     params: &[
-        Param::Choice { prompt: "天线", options: ANT_OPTS },
-        Param::Text { prompt: "块号", default: "0" },
-        Param::Text { prompt: "数据（8 位 hex，如 aabbccdd）", default: "" },
+        Param::Choice { prompt: "Antenna", options: ANT_OPTS },
+        Param::Text { prompt: "Block number", default: "0" },
+        Param::Text { prompt: "Data (8 hex digits, e.g. aabbccdd)", default: "" },
     ],
     cmds: &["sudo {0} /opt/microduck-test/nfc/nfc-test nfcv write {1} {2}"],
 };
 
 static NFC_WRITE_ESL: Action = Action {
-    title: "写墨水屏（ESL 电子标签）",
-    expect: "上传 4 个位面后打印 refresh done；墨水屏显示对应图片",
-    manual: "FMSC ESL 标签（1.54 寸六色 240x240）需全程贴在天线上直到 refresh done；\
-             自定义图片须为 240x240 的 PNG/JPG/BMP/PPM，建议先按六色量化",
+    title: "Write e-ink tag (ESL)",
+    expect: "Prints refresh done after uploading the 4 bitplanes; the e-ink displays the image",
+    manual: "The FMSC ESL tag (1.54-inch six-color 240x240) must stay on the antenna until refresh done; \
+             a custom image must be a 240x240 PNG/JPG/BMP/PPM, preferably pre-quantized to the six panel colors",
     params: &[
         Param::Choice {
-            prompt: "图片",
-            options: &[("内置测试图（六色彩条）", ""), ("自定义图片路径", "custom")],
+            prompt: "Image",
+            options: &[("Built-in test pattern (six color bars)", ""), ("Custom image path", "custom")],
         },
-        Param::TextOptional { prompt: "自定义图片路径（选内置测试图直接回车）", default: "" },
-        Param::Choice { prompt: "天线", options: ANT_OPTS },
+        Param::TextOptional { prompt: "Custom image path (press Enter directly for the built-in pattern)", default: "" },
+        Param::Choice { prompt: "Antenna", options: ANT_OPTS },
     ],
     cmds: &["sudo {2} /opt/microduck-test/nfc/nfc-test write {1}"],
 };
 
 static NFC_MENU: Menu = Menu {
-    title: "NFC（ST25R100）",
+    title: "NFC (ST25R100)",
     items: &[
         Node::Action(&NFC_ID),
         Node::Action(&NFC_REGS),
@@ -688,12 +688,12 @@ static NFC_MENU: Menu = Menu {
     ],
 };
 
-// --------------------------------------------------------------------- 风扇
+// --------------------------------------------------------------------- Fan
 
 static FAN_AUTO: Action = Action {
-    title: "PWM / TACH 自动测试",
-    expect: "全速 TACH 约 600Hz，半速约 315Hz，停止后 0 脉冲，调速基本线性",
-    manual: "需连接风扇实物",
+    title: "PWM / TACH automatic test",
+    expect: "Full-speed TACH ~600Hz, half ~315Hz, 0 pulses when stopped; speed control roughly linear",
+    manual: "Requires the physical fan",
     params: &[],
     cmds: &[concat!(
         "pwm=$(ls -d /sys/class/hwmon/hwmon*/pwm1 2>/dev/null | head -1); ",
@@ -708,12 +708,12 @@ static FAN_AUTO: Action = Action {
 };
 
 static FAN_SET: Action = Action {
-    title: "手动设定转速",
-    expect: "pwm 写读一致，风扇转速随之变化",
+    title: "Set speed manually",
+    expect: "pwm reads back what was written; fan speed follows",
     manual: "",
     params: &[Param::Choice {
-        prompt: "占空比",
-        options: &[("全速 (255)", "255"), ("半速 (128)", "128"), ("停止 (0)", "0")],
+        prompt: "Duty cycle",
+        options: &[("Full (255)", "255"), ("Half (128)", "128"), ("Stop (0)", "0")],
     }],
     cmds: &[
         "pwm=$(ls -d /sys/class/hwmon/hwmon*/pwm1 2>/dev/null | head -1); \
@@ -724,32 +724,32 @@ static FAN_SET: Action = Action {
 };
 
 static FAN_MENU: Menu = Menu {
-    title: "风扇",
+    title: "Fan",
     items: &[Node::Action(&FAN_AUTO), Node::Action(&FAN_SET)],
 };
 
 // ------------------------------------------------------------------ UART3
 
 static UART3: Action = Action {
-    title: "端口检查",
-    expect: "/dev/ttyS3 存在且可正常配置",
+    title: "Port check",
+    expect: "/dev/ttyS3 exists and configures cleanly",
     manual: "",
     params: &[],
     cmds: &["ls /dev/ttyS3 && stty -F /dev/ttyS3 115200"],
 };
 
 static DXL_SCAN: Action = Action {
-    title: "总线扫描",
-    expect: "列出应答设备的 (ID, model)：GD32 电源板 (200, 1200)，舵机 (1, 1200)，可能有第二舵机 (2, 1200)；电源板伪装成 XL330，靠 ID 200 区分",
-    manual: "扫 1 Mbps，约 1 分钟",
+    title: "Bus scan",
+    expect: "Lists responding devices as (ID, model): GD32 power board (200, 1200), servo (1, 1200), possibly a second servo (2, 1200); the power board masquerades as an XL330 — tell it apart by ID 200",
+    manual: "Scans at 1 Mbps, takes about a minute",
     params: &[],
     cmds: &["sudo /opt/microduck-test/dxl/dxl scan 1000000"],
 };
 
 static DXL_GD32: Action = Action {
-    title: "GD32 电源板",
-    expect: "ping 10/10、model 1200（伪装 XL330）、fw 7、err=0；imu_online=true，电压 5~20 V",
-    manual: "ID 200；err=128 只是硬件告警标志，err=0 才是无告警",
+    title: "GD32 power board",
+    expect: "ping 10/10, model 1200 (XL330 disguise), fw 7, err=0; imu_online=true, voltage 5-20 V",
+    manual: "ID 200; err=128 is just the hardware alarm flag, err=0 means no alarms",
     params: &[],
     cmds: &[
         "sudo /opt/microduck-test/dxl/dxl ping 200",
@@ -758,10 +758,10 @@ static DXL_GD32: Action = Action {
 };
 
 static DXL_SERVO_PING: Action = Action {
-    title: "舵机 ping / 状态",
-    expect: "ping 10/10、model 1200 (XL330)；电压读数为 0.1 V/计数",
-    manual: "err=128 表示有硬件告警，原因看 hw_err（bit0=电压告警，8.3 V 母线下属预期，不影响运转）",
-    params: &[Param::Text { prompt: "舵机 ID", default: "1" }],
+    title: "Servo ping / status",
+    expect: "ping 10/10, model 1200 (XL330); voltage reads 0.1 V per count",
+    manual: "err=128 means a hardware alarm; see hw_err for the cause (bit0=voltage alarm, expected on the 8.3 V bus, does not affect operation)",
+    params: &[Param::Text { prompt: "Servo ID", default: "1" }],
     cmds: &[
         "sudo /opt/microduck-test/dxl/dxl ping {0}",
         "sudo /opt/microduck-test/dxl/dxl read {0} 70 1",
@@ -770,35 +770,35 @@ static DXL_SERVO_PING: Action = Action {
 };
 
 static DXL_SERVO_MOVE: Action = Action {
-    title: "舵机转动测试",
-    expect: "舵机以零位为中心按设定摆幅往返，结束回零位后自动卸力，0 errors",
-    manual: "观察舵机实际转动；不转或抖动判 FAIL",
+    title: "Servo motion test",
+    expect: "The servo sweeps the set amplitude around center, homes and unloads at the end, 0 errors",
+    manual: "Watch the servo actually move; no motion or jittering is a FAIL",
     params: &[
-        Param::Text { prompt: "舵机 ID", default: "1" },
-        Param::Text { prompt: "时长 (秒)", default: "10" },
-        Param::Text { prompt: "摆幅 (±度)", default: "15" },
+        Param::Text { prompt: "Servo ID", default: "1" },
+        Param::Text { prompt: "Duration (s)", default: "10" },
+        Param::Text { prompt: "Amplitude (±deg)", default: "15" },
     ],
     cmds: &["sudo /opt/microduck-test/dxl/dxl move {0} {1} {2}"],
 };
 
 static DXL_SERVO_FIXVOLT: Action = Action {
-    title: "舵机过压过温修复",
-    expect: "Shutdown bit0/bit1 清除并重启，复查 hw_err",
-    manual: "仅当舵机因过压/过热保护锁死（Shutdown bit0/bit1 置位）时使用；过热修复须等舵机冷却，否则会再次跳闸；8.3 V 母线下 hw_err bit0 仍会置位，属预期",
-    params: &[Param::Text { prompt: "舵机 ID", default: "1" }],
+    title: "Servo overvoltage/overheat recovery",
+    expect: "Shutdown bit0/bit1 cleared and rebooted; recheck hw_err",
+    manual: "Only for servos latched by overvoltage/overheat protection (Shutdown bit0/bit1 set); for overheat let the servo cool first or it trips again; on the 8.3 V bus hw_err bit0 still sets — expected",
+    params: &[Param::Text { prompt: "Servo ID", default: "1" }],
     cmds: &["sudo /opt/microduck-test/dxl/dxl fixvolt {0}"],
 };
 
 static DXL_SERVO_SETUP: Action = Action {
-    title: "配置新舵机",
-    expect: "出厂舵机 (ID 1 @ 57600) 写入目标 ID 和 1 Mbps 波特率，最后在新配置下 ping 通",
-    manual: "总线上一次只能接一个新舵机；检测到多个 57600 设备会拒绝执行",
-    params: &[Param::Text { prompt: "目标 ID", default: "1" }],
+    title: "Set up a new servo",
+    expect: "Writes the target ID and 1 Mbps baud to the factory servo (ID 1 @ 57600), then pings it under the new configuration",
+    manual: "Only one new servo on the bus at a time; multiple 57600 devices abort the setup",
+    params: &[Param::Text { prompt: "Target ID", default: "1" }],
     cmds: &["sudo /opt/microduck-test/dxl/dxl setup {0}"],
 };
 
 static DXL_MENU: Menu = Menu {
-    title: "Dynamixel 总线 (UART3)",
+    title: "Dynamixel bus (UART3)",
     items: &[
         Node::Action(&UART3),
         Node::Action(&DXL_SCAN),
@@ -810,16 +810,16 @@ static DXL_MENU: Menu = Menu {
     ],
 };
 
-// ------------------------------------------------------------ Recovery 键
+// ------------------------------------------------------------ Recovery key
 
 static RECOVERY_KEY: Action = Action {
-    title: "Recovery 键",
-    expect: "松开 SW2 时 raw=1023，按住时读数显著下降",
-    manual: "下载模式需单独验证：u-boot 阶段按住 SW2 重启，PC 端 rkdeveloptool ld 应显示 Loader 设备",
+    title: "Recovery key",
+    expect: "raw=1023 with SW2 released; drops significantly while held",
+    manual: "Download mode needs separate verification: hold SW2 during u-boot and reboot; rkdeveloptool ld on the PC should show a Loader device",
     params: &[],
     cmds: &[
         "cat /sys/bus/iio/devices/iio:device0/in_voltage0_raw; \
-         read -p '按住 SW2 不放并回车: ' -r; \
+         read -p 'Hold SW2 down and press Enter: ' -r; \
          cat /sys/bus/iio/devices/iio:device0/in_voltage0_raw",
     ],
 };
@@ -827,10 +827,10 @@ static RECOVERY_KEY: Action = Action {
 // ----------------------------------------------------------------- Maskrom
 
 static MASKROM: Action = Action {
-    title: "Maskrom 测试点",
-    expect: "PC 端能识别 Maskrom 设备并正常烧录",
-    manual: "需断电操作：断电后短接 TP64（eMMC_D0）到 TP4（GND），上电进入 maskrom，\
-             PC 端 rkdeveloptool ld 应显示 Maskrom 设备",
+    title: "Maskrom test point",
+    expect: "The PC enumerates the Maskrom device and flashing works",
+    manual: "Requires a power cycle: with power off, short TP64 (eMMC_D0) to TP4 (GND), then power on into maskrom; \
+             rkdeveloptool ld on the PC should list a Maskrom device",
     params: &[],
     cmds: &[],
 };
@@ -838,29 +838,29 @@ static MASKROM: Action = Action {
 // ------------------------------------------------------------------- HW_ID
 
 static HW_ID: Action = Action {
-    title: "HW_ID（SARADC ch1）",
-    expect: "raw=1023，对应 Version 1（Rup 10K / Rdown DNP）",
+    title: "HW_ID (SARADC ch1)",
+    expect: "raw=1023, meaning Version 1 (Rup 10K / Rdown DNP)",
     manual: "",
     params: &[],
     cmds: &["cat /sys/bus/iio/devices/iio:device0/in_voltage1_raw"],
 };
 
-// ----------------------------------------------------------- DDR/CPU 压力
+// ----------------------------------------------------------- DDR/CPU stress
 
 static MEMTESTER: Action = Action {
-    title: "memtester（单遍全项目）",
-    expect: "Stuck Address / Random Value / XOR / Walking Ones 等全部 ok",
+    title: "memtester (single full pass)",
+    expect: "Stuck Address / Random Value / XOR / Walking Ones etc. all ok",
     manual: "",
-    params: &[Param::Text { prompt: "测试大小", default: "128M" }],
+    params: &[Param::Text { prompt: "Test size", default: "128M" }],
     cmds: &["sudo memtester {0} 1"],
 };
 
 static DDR_FREQ: Action = Action {
-    title: "DDR 变频",
-    expect: "输出 success change to ... Hz；cur_freq 与目标一致",
-    manual: "测完请执行“恢复 DDR 变频”",
+    title: "DDR frequency switch",
+    expect: "Prints success change to ... Hz; cur_freq matches the target",
+    manual: "Run 'Restore DDR DVFS' afterwards",
     params: &[Param::Choice {
-        prompt: "目标频率",
+        prompt: "Target frequency",
         options: &[
             ("324 MHz", "324000000"),
             ("528 MHz", "528000000"),
@@ -875,18 +875,18 @@ static DDR_FREQ: Action = Action {
 };
 
 static DDR_FREQ_RESTORE: Action = Action {
-    title: "恢复 DDR 变频（dmc_ondemand）",
-    expect: "governor 恢复 dmc_ondemand",
+    title: "Restore DDR DVFS (dmc_ondemand)",
+    expect: "governor back to dmc_ondemand",
     manual: "",
     params: &[],
     cmds: &["echo dmc_ondemand | sudo tee /sys/class/devfreq/dmc/governor"],
 };
 
 static CPU_FREQ_STRESS: Action = Action {
-    title: "CPU 变频压力（约 100 秒）",
-    expect: "每档输出 successfully changed；stress-ng 报 successful run completed；\
-             测完 governor 恢复 ondemand",
-    manual: "负载下逐档变频",
+    title: "CPU frequency stress (~100 seconds)",
+    expect: "Each step prints successfully changed; stress-ng reports successful run completed; \
+             governor restored to ondemand afterwards",
+    manual: "Steps through frequencies under load",
     params: &[],
     cmds: &[
         "sudo stress-ng --cpu 4 --timeout 60 & sleep 2; \
@@ -897,10 +897,10 @@ static CPU_FREQ_STRESS: Action = Action {
 };
 
 static STRESSAPP: Action = Action {
-    title: "stressapptest（DDR 压力）",
-    expect: "Status: PASS，0 错误",
-    manual: "量产建议 24h",
-    params: &[Param::Text { prompt: "压测时长 (秒)", default: "300" }],
+    title: "stressapptest (DDR stress)",
+    expect: "Status: PASS, 0 errors",
+    manual: "24h recommended for mass production",
+    params: &[Param::Text { prompt: "Stress duration (s)", default: "300" }],
     cmds: &[
         "sudo mkdir -p /userdata/rockchip-test && \
          sudo stressapptest -s {0} -i 4 -C 4 -W --stop_on_errors -M 128 \
@@ -909,7 +909,7 @@ static STRESSAPP: Action = Action {
 };
 
 static STRESS_MENU: Menu = Menu {
-    title: "DDR / CPU 压力",
+    title: "DDR / CPU stress",
     items: &[
         Node::Action(&MEMTESTER),
         Node::Action(&DDR_FREQ),
@@ -919,28 +919,28 @@ static STRESS_MENU: Menu = Menu {
     ],
 };
 
-// ---------------------------------------------------------------- 自动全检
+// ---------------------------------------------------------------- Auto full check
 
 // Runs via run_auto_check (quiet, auto-judged), not the generic runner.
 static AUTO_CHECK: Action = Action {
-    title: "自动全检",
+    title: "Auto full check",
     expect: "",
-    manual: "全程自动判定，无需输入；请预先将两张 NFC 标签分别贴到 J30 / J31 天线上。\n\
-             期间全部 LED 一起由暗到亮再到暗渐变、风扇由低到高循环变速，结束后 LED 熄灭、风扇保持全速运转。",
+    manual: "Fully automatic, no input needed; attach one NFC tag to each of the J30 / J31 antennas beforehand.\n\
+             During the run all LEDs fade dim->bright->dim together and the fan sweeps low->high; afterwards the LEDs go dark and the fan stays at full speed.",
     params: &[],
     cmds: &[],
 };
 
-// ----------------------------------------------------------------- 主菜单
+// ----------------------------------------------------------------- Main menu
 
 static MAIN_MENU: Menu = Menu {
-    title: "MicroDuck D4 硬件测试",
+    title: "MicroDuck D4 hardware test",
     items: &[
-        Node::Menu(&Menu { title: "SoC / CPU 变频", items: &[Node::Action(&SOC_FREQ)] }),
-        Node::Menu(&Menu { title: "内存", items: &[Node::Action(&MEM_INFO)] }),
+        Node::Menu(&Menu { title: "SoC / CPU DVFS", items: &[Node::Action(&SOC_FREQ)] }),
+        Node::Menu(&Menu { title: "Memory", items: &[Node::Action(&MEM_INFO)] }),
         Node::Menu(&EMMC_MENU),
-        Node::Menu(&Menu { title: "PMIC 电源轨", items: &[Node::Action(&PMIC)] }),
-        Node::Menu(&Menu { title: "电源输入级", items: &[Node::Action(&POWER_IN)] }),
+        Node::Menu(&Menu { title: "PMIC power rails", items: &[Node::Action(&PMIC)] }),
+        Node::Menu(&Menu { title: "Power input stage", items: &[Node::Action(&POWER_IN)] }),
         Node::Menu(&Menu { title: "RTC", items: &[Node::Action(&RTC)] }),
         Node::Menu(&THERMAL_MENU),
         Node::Menu(&WIFI_MENU),
@@ -948,26 +948,26 @@ static MAIN_MENU: Menu = Menu {
         Node::Menu(&Menu { title: "USB-C OTG", items: &[Node::Action(&OTG)] }),
         Node::Menu(&AUDIO_MENU),
         Node::Menu(&CAMERA_MENU),
-        Node::Menu(&Menu { title: "H.264 硬件编码", items: &[Node::Action(&H264_ENC)] }),
+        Node::Menu(&Menu { title: "H.264 hardware encoding", items: &[Node::Action(&H264_ENC)] }),
         Node::Menu(&Menu { title: "GPU / VPU / RGA2 / NPU", items: &[Node::Action(&GPU_VPU)] }),
-        Node::Menu(&Menu { title: "HWRNG / 看门狗", items: &[Node::Action(&HWRNG)] }),
+        Node::Menu(&Menu { title: "HWRNG / watchdog", items: &[Node::Action(&HWRNG)] }),
         Node::Menu(&Menu { title: "Board ID EEPROM", items: &[Node::Action(&EEPROM)] }),
-        Node::Menu(&Menu { title: "Qwiic（I2C3）", items: &[Node::Action(&QWIIC)] }),
+        Node::Menu(&Menu { title: "Qwiic (I2C3)", items: &[Node::Action(&QWIIC)] }),
         Node::Menu(&LED_MENU),
         Node::Menu(&IMU_MENU),
-        Node::Menu(&Menu { title: "Face 小板 ToF", items: &[Node::Action(&TOF), Node::Action(&TOF_FPS)] }),
+        Node::Menu(&Menu { title: "Face board ToF", items: &[Node::Action(&TOF), Node::Action(&TOF_FPS)] }),
         Node::Menu(&NFC_MENU),
         Node::Menu(&FAN_MENU),
         Node::Menu(&DXL_MENU),
-        Node::Menu(&Menu { title: "Recovery 键 / 下载模式", items: &[Node::Action(&RECOVERY_KEY)] }),
-        Node::Menu(&Menu { title: "Maskrom 测试点", items: &[Node::Action(&MASKROM)] }),
+        Node::Menu(&Menu { title: "Recovery key / download mode", items: &[Node::Action(&RECOVERY_KEY)] }),
+        Node::Menu(&Menu { title: "Maskrom test point", items: &[Node::Action(&MASKROM)] }),
         Node::Menu(&Menu { title: "HW_ID", items: &[Node::Action(&HW_ID)] }),
         Node::Menu(&STRESS_MENU),
-        Node::Menu(&Menu { title: "自动全检", items: &[Node::Action(&AUTO_CHECK)] }),
+        Node::Menu(&Menu { title: "Auto full check", items: &[Node::Action(&AUTO_CHECK)] }),
     ],
 };
 
-// ------------------------------------------------------------------ 运行时
+// ------------------------------------------------------------------ Runtime
 
 #[derive(Clone, Copy)]
 enum Verdict {
@@ -1021,7 +1021,7 @@ fn main() {
     }
 
     if !is_root() {
-        println!("!! 当前不是 root，部分项目需要 sudo；建议以 sudo hwtest 运行");
+        println!("!! Not root; some items need sudo; preferably run as sudo hwtest");
     }
 
     let mut results: Vec<(String, Verdict)> = Vec::new();
@@ -1035,7 +1035,7 @@ fn main() {
     if results.is_empty() {
         return;
     }
-    println!("\n===== 测试总结 =====");
+    println!("\n===== Test Summary =====");
     let mut report = String::new();
     for (label, verdict) in &results {
         println!("{:<48} {}", label, verdict.colored());
@@ -1045,14 +1045,14 @@ fn main() {
     }
     let path = "/tmp/hwtest-report.txt";
     match std::fs::write(path, &report) {
-        Ok(()) => println!("\n报告已写入 {path}"),
-        Err(e) => eprintln!("无法写入 {path}: {e}"),
+        Ok(()) => println!("\nReport written to {path}"),
+        Err(e) => eprintln!("Cannot write {path}: {e}"),
     }
 }
 
 fn usage(prog: &str) -> ! {
-    eprintln!("usage: {prog}         交互式菜单");
-    eprintln!("       {prog} --list  打印测试项目树");
+    eprintln!("usage: {prog}         interactive menu");
+    eprintln!("       {prog} --list  print the test item tree");
     std::process::exit(2);
 }
 
@@ -1078,9 +1078,9 @@ fn menu_loop(menu: &'static Menu, crumb: &str, results: &mut Vec<(String, Verdic
             println!("{:>2}. {}", i + 1, item.title());
         }
         let hint = if depth == 0 {
-            "编号选择，q 退出"
+            "pick a number, q to quit"
         } else {
-            "编号选择，b 返回上级，m 主菜单，q 退出"
+            "pick a number, b back, m main menu, q to quit"
         };
         match prompt(&format!("{hint}: ")).as_str() {
             "q" | "Q" => return Nav::Quit,
@@ -1100,7 +1100,7 @@ fn menu_loop(menu: &'static Menu, crumb: &str, results: &mut Vec<(String, Verdic
                         }
                     }
                 },
-                _ => println!("输入无效，请重试"),
+                _ => println!("Invalid input, try again"),
             },
         }
     }
@@ -1127,13 +1127,13 @@ fn run_audio_loopback(action: &Action, label: &str, results: &mut Vec<(String, V
     }
 
     println!("\n===== {label} =====");
-    println!("说明: {}", action.manual);
+    println!("Note: {}", action.manual);
     let mut args: Vec<String> = Vec::new();
     for param in action.params {
         match read_param(param) {
             Some(value) => args.push(value),
             None => {
-                println!("已取消");
+                println!("Cancelled");
                 return;
             }
         }
@@ -1151,7 +1151,7 @@ fn run_audio_loopback(action: &Action, label: &str, results: &mut Vec<(String, V
 
     let setup = run("amixer -q -c 0 sset 'Playback Path' SPK_HP && \
          amixer -q -c 0 sset 'DAC' 200 && amixer -q -c 0 sset 'HP Output Gain' 3");
-    println!("播放并录音 {dur}s...");
+    println!("Playing and recording {dur}s...");
     let played = run(&format!(
         "rm -f /tmp/mic-rec.wav; \
          aplay -q -D plughw:0,0 -d {dur} \"{wav}\" & \
@@ -1162,29 +1162,29 @@ fn run_audio_loopback(action: &Action, label: &str, results: &mut Vec<(String, V
         Some((peak, similarity)) => {
             ok = ok && peak > 1e6 / 2f32.powi(31) && similarity >= 0.4;
             println!(
-                "录音峰值 {:.3e}，与原音频相似度 {:.0}%（参考：相似度 ≥40% 为好）",
+                "Recording peak {:.3e}, similarity vs original {:.0}% (reference: >=40% similarity is good)",
                 peak * 2f32.powi(31),
                 similarity * 100.0
             );
         }
         None => {
             ok = false;
-            println!("音频文件解析失败");
+            println!("Failed to parse the audio file");
         }
     }
-    println!("回放录音...");
+    println!("Playing the recording back...");
     run("aplay -q -D plughw:0,0 /tmp/mic-rec.wav");
-    // 相似度自动判定仅供参考，最终以人耳听到的回放为准
-    println!("相似度自动判定: {}", if ok { Verdict::Pass.colored() } else { Verdict::Fail.colored() });
+    // The similarity auto-verdict is advisory; the final call is what the playback sounds like
+    println!("Similarity auto-verdict: {}", if ok { Verdict::Pass.colored() } else { Verdict::Fail.colored() });
     let verdict = loop {
-        match prompt("判定 [P]ass / [F]ail / [S]kip (默认 s): ").to_ascii_lowercase().as_str() {
+        match prompt("Verdict [P]ass / [F]ail / [S]kip (default s): ").to_ascii_lowercase().as_str() {
             "p" | "pass" => break Verdict::Pass,
             "f" | "fail" => break Verdict::Fail,
             "" | "s" | "skip" => break Verdict::Skip,
-            _ => println!("请输入 p / f / s"),
+            _ => println!("Enter p / f / s"),
         }
     };
-    println!("结果: {}\n", verdict.colored());
+    println!("Result: {}\n", verdict.colored());
     results.push((label.to_string(), verdict));
 }
 
@@ -1202,8 +1202,8 @@ fn run_auto_check(results: &mut Vec<(String, Verdict)>) {
         }
     }
 
-    println!("\n===== 自动全检 =====");
-    println!("说明: {}", AUTO_CHECK.manual);
+    println!("\n===== Auto Full Check =====");
+    println!("Note: {}", AUTO_CHECK.manual);
 
     let start = results.len();
     let mut index = 0u32;
@@ -1217,7 +1217,7 @@ fn run_auto_check(results: &mut Vec<(String, Verdict)>) {
         } else {
             println!();
         }
-        results.push((format!("自动全检 / {name}"), verdict));
+        results.push((format!("Auto full check / {name}"), verdict));
     };
 
     // Background effects for the whole sequence: LED fade in/out, fan sweep.
@@ -1237,17 +1237,17 @@ fn run_auto_check(results: &mut Vec<(String, Verdict)>) {
 
     // WiFi scan
     let (ok, out) = run("sudo nmcli -t -f SSID dev wifi list --rescan yes 2>/dev/null | grep -c .");
-    report("WiFi 扫描", ok, &format!("发现 {} 个热点（PASS 条件：≥1）", out.trim()), results);
+    report("WiFi scan", ok, &format!("found {} APs (PASS if: >=1)", out.trim()), results);
 
     // Bluetooth scan
     let (up, _) = run("sudo hciconfig hci0 2>/dev/null | grep -q 'UP RUNNING'");
     let (_, out) = run("sudo bluetoothctl --timeout 5 scan on 2>/dev/null | \
          grep -oiE 'device ([0-9a-f]{2}:){5}[0-9a-f]{2}' | sort -u | wc -l");
     report(
-        "蓝牙扫描",
+        "Bluetooth scan",
         up,
         &format!(
-            "控制器 {}，发现 {} 台设备（PASS 条件：控制器 UP RUNNING）",
+            "controller {}, found {} devices (PASS if: controller UP RUNNING)",
             if up { "UP RUNNING" } else { "DOWN" },
             out.trim()
         ),
@@ -1264,16 +1264,16 @@ fn run_auto_check(results: &mut Vec<(String, Verdict)>) {
         let (_, data) = run("sudo i2cget -y 3 0x6a 0x22 i 12 2>/dev/null");
         run("sudo i2cset -y 3 0x6a 0x10 0x00; sudo i2cset -y 3 0x6a 0x11 0x00");
         report(
-            "IMU 读数",
+            "IMU readings",
             true,
-            &format!("WHO_AM_I={id}（PASS 条件：==0x70）\n    陀螺仪+加速度: {}", data.trim()),
+            &format!("WHO_AM_I={id} (PASS if: ==0x70)\n    gyro+accel: {}", data.trim()),
             results,
         );
     } else {
         report(
-            "IMU 读数",
+            "IMU readings",
             false,
-            &format!("WHO_AM_I={id}（期望 0x70；读不到多为 Face 小板未接或 I2C3 异常）"),
+            &format!("WHO_AM_I={id} (expected 0x70; unreadable usually means the face board is absent or I2C3 is broken)"),
             results,
         );
     }
@@ -1286,9 +1286,9 @@ fn run_auto_check(results: &mut Vec<(String, Verdict)>) {
          test -s /tmp/photo.jpg");
     let (_, size) = run("stat -c %s /tmp/photo.jpg 2>/dev/null");
     report(
-        "摄像头拍照",
+        "Camera photo",
         ok,
-        &format!("/tmp/photo.jpg {} 字节（PASS 条件：抓帧成功且照片非空）", size.trim()),
+        &format!("/tmp/photo.jpg {} bytes (PASS if: capture succeeded and the photo is non-empty)", size.trim()),
         results,
     );
 
@@ -1296,15 +1296,15 @@ fn run_auto_check(results: &mut Vec<(String, Verdict)>) {
     let (ok, out) = run("sudo systemctl stop tofd; \
          sudo /opt/microduck-test/tof/vl53l8cx-test /dev/spidev3.0 5 4 2>&1; \
          rc=$?; sudo systemctl start tofd; exit $rc");
-    report("ToF 测距", ok, &format!("{}\n    （PASS 条件：init ok 且退出码 0）", out.trim()), results);
+    report("ToF ranging", ok, &format!("{}\n    (PASS if: init ok and exit code 0)", out.trim()), results);
 
     // GD32 power board over Dynamixel: dxl sensors exits 0 only when the
     // GD32 answers with err=0 and the IMU is online (exit 3 = IMU offline)
     let (ok, out) = run("sudo /opt/microduck-test/dxl/dxl sensors 2>&1");
     report(
-        "GD32 电源板 (Dynamixel)",
+        "GD32 power board (Dynamixel)",
         ok,
-        &format!("{}\n    （PASS 条件：ID 200 应答、err=0、imu_online=true）", out.trim()),
+        &format!("{}\n    (PASS if: ID 200 answers, err=0, imu_online=true)", out.trim()),
         results,
     );
 
@@ -1322,9 +1322,9 @@ fn run_auto_check(results: &mut Vec<(String, Verdict)>) {
          echo "orig=$orig"; echo "written=$pat"; echo "readback=$back"; echo "restored=$rest"; \
          [ -n "$pat" ] && [ "$back" = "$pat" ] && [ "$rest" = "$orig" ]"#);
     report(
-        "EEPROM 读写恢复",
+        "EEPROM write-read-restore",
         ok,
-        &format!("{}\n    （PASS 条件：写入回读一致，且原数据恢复一致）", out.trim()),
+        &format!("{}\n    (PASS if: readback matches the write and the original data is restored)", out.trim()),
         results,
     );
 
@@ -1344,9 +1344,9 @@ fn run_auto_check(results: &mut Vec<(String, Verdict)>) {
         }
     }
     report(
-        "NFC 轮询（双天线）",
+        "NFC polling (both antennas)",
         nfc_ok,
-        &format!("{}\n    （PASS 条件：两路天线都读到卡 UID）", lines.join("\n    ")),
+        &format!("{}\n    (PASS if: both antennas read a card UID)", lines.join("\n    ")),
         results,
     );
 
@@ -1372,20 +1372,20 @@ fn run_auto_check(results: &mut Vec<(String, Verdict)>) {
             Some((peak, similarity)) => {
                 audio_ok = peak > 1e6 / 2f32.powi(31) && similarity >= 0.4;
                 detail = format!(
-                    "录音峰值 {:.3e}，与原音频相似度 {:.0}%（PASS 条件：播放成功、峰值 >1e6、相似度 ≥40%）",
+                    "Recording peak {:.3e}, similarity vs original {:.0}% (PASS if: playback ok, peak >1e6, similarity >=40%)",
                     peak * 2f32.powi(31),
                     similarity * 100.0
                 );
             }
             None => {
                 audio_ok = false;
-                detail = "音频文件解析失败".to_string();
+                detail = "Failed to parse the audio file".to_string();
             }
         }
     } else {
-        detail = "音频文件缺失或声卡设置失败（PASS 条件：播放成功、峰值 >1e6、相似度 ≥40%）".to_string();
+        detail = "Audio file missing or sound card setup failed (PASS if: playback ok, peak >1e6, similarity >=40%)".to_string();
     }
-    report("音频回路（喇叭 + 麦克）", audio_ok, &detail, results);
+    report("Audio loopback (speaker + mic)", audio_ok, &detail, results);
 
     // Stop background loops ([x] keeps pkill from matching this shell);
     // LEDs off, fan stays on at full speed
@@ -1396,20 +1396,20 @@ fn run_auto_check(results: &mut Vec<(String, Verdict)>) {
 
     let done = &results[start..];
     let passed = done.iter().filter(|(_, v)| matches!(v, Verdict::Pass)).count();
-    println!("自动全检完成: {}/{} 项 PASS", passed, done.len());
+    println!("Auto full check done: {}/{} items PASS", passed, done.len());
 }
 
 fn run_action(action: &Action, label: &str, results: &mut Vec<(String, Verdict)>) {
     println!("\n===== {label} =====");
     if !action.manual.is_empty() {
-        println!("说明: {}", action.manual);
+        println!("Note: {}", action.manual);
     }
     let mut args: Vec<String> = Vec::new();
     for param in action.params {
         match read_param(param) {
             Some(value) => args.push(value),
             None => {
-                println!("已取消");
+                println!("Cancelled");
                 return;
             }
         }
@@ -1423,19 +1423,19 @@ fn run_action(action: &Action, label: &str, results: &mut Vec<(String, Verdict)>
             // Signal termination (e.g. Ctrl-C ending evtest) counts as pass
             Ok(s) => {
                 if let Some(code) = s.code() {
-                    println!("!! 命令退出码: {code}");
+                    println!("!! command exit code: {code}");
                     failed = true;
                 }
             }
             Err(e) => {
-                println!("!! 无法执行命令: {e}");
+                println!("!! cannot run command: {e}");
                 failed = true;
             }
         }
     }
-    println!("\n预期: {}", action.expect);
+    println!("\nExpected: {}", action.expect);
     let verdict = if failed { Verdict::Fail } else { Verdict::Pass };
-    println!("结果: {}\n", verdict.colored());
+    println!("Result: {}\n", verdict.colored());
     results.push((label.to_string(), verdict));
 }
 
@@ -1444,23 +1444,23 @@ fn read_param(param: &Param) -> Option<String> {
     match param {
         Param::Text { prompt: label, default } => loop {
             let hint = if default.is_empty() {
-                format!("{label} (c 取消): ")
+                format!("{label} (c to cancel): ")
             } else {
-                format!("{label} [{default}] (c 取消): ")
+                format!("{label} [{default}] (c to cancel): ")
             };
             let input = prompt(&hint);
             match input.as_str() {
                 "c" | "C" => return None,
                 "" if !default.is_empty() => return Some(default.to_string()),
-                "" => println!("不能为空"),
+                "" => println!("Cannot be empty"),
                 _ => return Some(input),
             }
         },
         Param::TextOptional { prompt: label, default } => {
             let hint = if default.is_empty() {
-                format!("{label} (c 取消): ")
+                format!("{label} (c to cancel): ")
             } else {
-                format!("{label} [{default}] (c 取消): ")
+                format!("{label} [{default}] (c to cancel): ")
             };
             let input = prompt(&hint);
             match input.as_str() {
@@ -1474,13 +1474,13 @@ fn read_param(param: &Param) -> Option<String> {
             for (i, (name, _)) in options.iter().enumerate() {
                 println!("  {}) {}", i + 1, name);
             }
-            match prompt("选择 (c 取消): ").as_str() {
+            match prompt("Select (c to cancel): ").as_str() {
                 "c" | "C" => return None,
                 input => match input.parse::<usize>() {
                     Ok(n) if n >= 1 && n <= options.len() => {
                         return Some(options[n - 1].1.to_string());
                     }
-                    _ => println!("输入无效，请重试"),
+                    _ => println!("Invalid input, try again"),
                 },
             }
         },
