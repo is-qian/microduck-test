@@ -1,0 +1,103 @@
+From 8bd49d0ca5b0da8157338f35a3cd463594178a00 Mon Sep 17 00:00:00 2001
+From: microduck test-tools <dev@example.com>
+Date: Fri, 30 Oct 2026 22:21:29 +0800
+Subject: [PATCH] led: make the face LEDs controllable on the V1.0 board
+
+Two V0 assumptions broke LED control on the face board V1.0:
+
+- Led::set(On) wrote brightness=1: gpio-leds read any non-zero as on,
+  but the V1.0 AW21009/AW2023 are PWM drivers and dim by the value, so
+  1 is 1/255 duty, all but dark. Write max_brightness instead.
+- the LED daemons' units hand back only /sys/devices/platform/face-leds
+  from ProtectKernelTunables' read-only /sys; on the V1.0 board the
+  LEDs are I2C-backed, so every write failed with EROFS. Hand back the
+  AW21009 (3-0020) and AW2023 (3-0045) leds directories too.
+
+Verified on a V1.0 board: Home toggles the flashlight at full
+brightness.
+---
+ configd/systemd/configd.service | 3 +++
+ duck-ipc-proto/src/led.rs       | 9 +++++++--
+ mediad/systemd/mediad.service   | 3 +++
+ robotd/systemd/robotd.service   | 3 +++
+ 4 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/configd/systemd/configd.service b/configd/systemd/configd.service
+index 9c0c1cd..bfc9e90 100644
+--- a/configd/systemd/configd.service
++++ b/configd/systemd/configd.service
+@@ -102,6 +102,9 @@ StateDirectory=robot/config
+ # switches them off when it stops cleanly — ExecStopPost does it when it did not, so a crashed
+ # configd cannot leave an LED claiming something it has stopped keeping true.
+ ReadWritePaths=-/sys/devices/platform/face-leds
++# Face board V1.0: the LEDs hang off the I2C drivers instead.
++ReadWritePaths=-/sys/devices/platform/fe5c0000.i2c/i2c-3/3-0020/leds
++ReadWritePaths=-/sys/devices/platform/fe5c0000.i2c/i2c-3/3-0045/leds
+ ExecStopPost=-/bin/sh -c 'cd /sys/class/leds 2>/dev/null || exit 0; for l in face:gb:green face:gb:blue; do echo 0 > "$$l/brightness"; done 2>/dev/null; exit 0'
+ 
+ # stderr → journal; level via RUST_LOG. The startup identity line is at `warn` so it survives
+diff --git a/duck-ipc-proto/src/led.rs b/duck-ipc-proto/src/led.rs
+index c315b87..6ddac3a 100644
+--- a/duck-ipc-proto/src/led.rs
++++ b/duck-ipc-proto/src/led.rs
+@@ -95,7 +95,11 @@ impl Led {
+             Light::Off => self.write("brightness", "0"),
+             Light::On => {
+                 self.write("trigger", "none")?;
+-                self.write("brightness", "1")
++                // gpio-leds take any non-zero, but the V1.0 face board's PWM
++                // drivers dim by the value: 1 is all but dark there.
++                let max = std::fs::read_to_string(self.path.join("max_brightness"))
++                    .map_err(|e| format!("reading max_brightness: {e}"))?;
++                self.write("brightness", max.trim())
+             }
+             Light::Blink => self.write("trigger", "timer"),
+         }
+@@ -118,6 +122,7 @@ mod tests {
+             let led = dir.path().join(name);
+             std::fs::create_dir(&led).unwrap();
+             std::fs::write(led.join("brightness"), "0").unwrap();
++            std::fs::write(led.join("max_brightness"), "255").unwrap();
+             std::fs::write(led.join("trigger"), "[none] timer").unwrap();
+         }
+         dir
+@@ -142,7 +147,7 @@ mod tests {
+         assert_eq!(read(dir.path(), name::CAMERA, "trigger"), "timer");
+         led.set(Light::On).unwrap();
+         assert_eq!(read(dir.path(), name::CAMERA, "trigger"), "none");
+-        assert_eq!(read(dir.path(), name::CAMERA, "brightness"), "1");
++        assert_eq!(read(dir.path(), name::CAMERA, "brightness"), "255");
+         led.set(Light::Off).unwrap();
+         assert_eq!(read(dir.path(), name::CAMERA, "brightness"), "0");
+     }
+diff --git a/mediad/systemd/mediad.service b/mediad/systemd/mediad.service
+index 195b33d..19db03d 100644
+--- a/mediad/systemd/mediad.service
++++ b/mediad/systemd/mediad.service
+@@ -102,6 +102,9 @@ CapabilityBoundingSet=
+ # switches them off when it stops cleanly — ExecStopPost does it when it did not, so a crashed
+ # mediad cannot leave an LED claiming something it has stopped keeping true.
+ ReadWritePaths=-/sys/devices/platform/face-leds
++# Face board V1.0: the LEDs hang off the I2C drivers instead.
++ReadWritePaths=-/sys/devices/platform/fe5c0000.i2c/i2c-3/3-0020/leds
++ReadWritePaths=-/sys/devices/platform/fe5c0000.i2c/i2c-3/3-0045/leds
+ ExecStopPost=-/bin/sh -c 'cd /sys/class/leds 2>/dev/null || exit 0; for l in face:cam:red; do echo 0 > "$$l/brightness"; done 2>/dev/null; exit 0'
+ 
+ # NOT MemoryDenyWriteExecute=yes, unlike padd. GStreamer dlopens its plugins, and a hardware codec
+diff --git a/robotd/systemd/robotd.service b/robotd/systemd/robotd.service
+index 050f7b4..efb04f2 100644
+--- a/robotd/systemd/robotd.service
++++ b/robotd/systemd/robotd.service
+@@ -71,6 +71,9 @@ RestrictSUIDSGID=yes
+ # switches them off when it stops cleanly — ExecStopPost does it when it did not, so a crashed
+ # robotd cannot leave an LED claiming something it has stopped keeping true.
+ ReadWritePaths=-/sys/devices/platform/face-leds
++# Face board V1.0: the LEDs hang off the I2C drivers instead.
++ReadWritePaths=-/sys/devices/platform/fe5c0000.i2c/i2c-3/3-0020/leds
++ReadWritePaths=-/sys/devices/platform/fe5c0000.i2c/i2c-3/3-0045/leds
+ ExecStopPost=-/bin/sh -c 'cd /sys/class/leds 2>/dev/null || exit 0; for l in face:gr2:green face:gr2:red face:gr1:green face:gr1:red face:green1:green face:green2:green face:rgb:red face:rgb:green face:rgb:blue; do echo 0 > "$$l/brightness"; done 2>/dev/null; exit 0'
+ 
+ # stderr → journal; level via RUST_LOG.
+-- 
+2.53.0
+

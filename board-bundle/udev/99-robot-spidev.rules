@@ -1,0 +1,2 @@
+SUBSYSTEM=="spidev", KERNEL=="spidev1.0", GROUP="robot", MODE="0660"
+SUBSYSTEM=="spidev", KERNEL=="spidev3.0", GROUP="robot", MODE="0660"

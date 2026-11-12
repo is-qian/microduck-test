@@ -1,0 +1,12 @@
+state.rockchiprk809co {
+	control.1 {
+		iface MIXER
+		name 'Playback Path'
+		value SPK_HP
+		comment {
+			access 'read write'
+			type ENUMERATED
+			count 1
+		}
+	}
+}

@@ -1,0 +1,616 @@
+diff --git a/pad-map/src/mapper.rs b/pad-map/src/mapper.rs
+index 1a471c4..50bf283 100644
+--- a/pad-map/src/mapper.rs
++++ b/pad-map/src/mapper.rs
+@@ -322,6 +322,14 @@ impl Mapper {
+                 tracing::debug!(button, "no skill bound");
+                 continue;
+             }
++            // A "mode:" binding switches the drive mode instead of running a
++            // skill: `pad bind y mode:roller` puts the wheels on Y.
++            if let Some(mode) = skill.strip_prefix("mode:") {
++                out.push(Out::Request(proto::Call::RobotSetMode(proto::SetModeParams {
++                    mode: mode.to_owned(),
++                })));
++                continue;
++            }
+             out.push(Out::Request(proto::Call::RobotDo(proto::DoParams {
+                 skill: skill.to_owned(),
+             })));
+@@ -348,7 +356,8 @@ impl Mapper {
+         // the resend, which costs a notification nobody reads. Only X, because it is the button
+         // the prototype held the roulade on.
+         let held = cfg.bindings.skill("x").unwrap_or_default();
+-        if pad.held.contains(Buttons::X) && !pad.pressed.contains(Buttons::X) && !held.is_empty() {
++        let held_chains = !held.is_empty() && !held.starts_with("mode:");
++        if pad.held.contains(Buttons::X) && !pad.pressed.contains(Buttons::X) && held_chains {
+             out.push(Out::Notify(proto::Call::RobotDo(proto::DoParams {
+                 skill: held.to_owned(),
+             })));
+@@ -581,6 +590,47 @@ mod tests {
+         Config::defaults(false, &Default::default())
+     }
+ 
++    /// A `mode:` binding switches the drive mode instead of running a skill, and a
++    /// held X does not re-send it — a mode is not a chaining skill.
++    #[test]
++    fn a_mode_binding_switches_modes_instead_of_running_a_skill() {
++        let (mut m, mut cfg, t) = (Mapper::new(), cfg(), Instant::now());
++        cfg.bindings.bind("y", "mode:roller");
++        cfg.bindings.bind("x", "mode:walk");
++        let (mut out, mut frame) = (Vec::new(), Vec::new());
++
++        let pad = PadFrame {
++            pressed: Buttons::Y,
++            held: Buttons::Y,
++            ..Default::default()
++        };
++        m.tick(&pad, &cfg, t, &mut out, &mut frame);
++        assert!(
++            out.contains(&Out::Request(proto::Call::RobotSetMode(
++                proto::SetModeParams {
++                    mode: "roller".to_owned()
++                }
++            ))),
++            "{out:?}"
++        );
++        assert!(
++            !out.iter().any(|o| matches!(o, Out::Request(proto::Call::RobotDo(_)))),
++            "no skill runs: {out:?}"
++        );
++
++        // Held X resends a chaining skill every tick; a mode binding stays silent.
++        out.clear();
++        let pad = PadFrame {
++            held: Buttons::X,
++            ..Default::default()
++        };
++        m.tick(&pad, &cfg, t, &mut out, &mut frame);
++        assert!(
++            !out.iter().any(|o| matches!(o, Out::Notify(proto::Call::RobotDo(_)))),
++            "a held mode binding is not resent: {out:?}"
++        );
++    }
++
+     /// The whole path a frame takes: a D-pad edge changes mode once, a held one does not change
+     /// it again, a stick inside the deadzone walks nothing, and A's edge runs A's binding.
+     /// Home toggles the flashlight, on its edge: once per press, held or not, and the robot owns
+diff --git a/robotctl/src/main.rs b/robotctl/src/main.rs
+index 4b25b58..d5bd43e 100644
+--- a/robotctl/src/main.rs
++++ b/robotctl/src/main.rs
+@@ -4714,7 +4714,9 @@ fn run_pad_bindings(
+             let skill = bindings.skill(button).unwrap_or_default();
+             let note = match (&known, skill) {
+                 (_, "") => "  (nothing)",
+-                (Some(known), s) if !known.iter().any(|k| k == s) => {
++                (Some(known), s)
++                    if !known.iter().any(|k| k == s) && mode_binding(s).is_none() =>
++                {
+                     "  — this robot has no such skill"
+                 }
+                 _ => "",
+@@ -4800,9 +4802,17 @@ fn run_pad_bindings(
+         ));
+     }
+ 
+-    // Checked against the robot, not against anything here. An unknown name would otherwise
+-    // become a button that does nothing, discovered by pressing it.
+-    if !skill.is_empty()
++    // A `mode:` binding names a drive mode, not a skill — pad-map turns it into
++    // `robot.setMode`. Checked here so a typo fails loudly rather than binding a
++    // button that does nothing.
++    if skill.starts_with("mode:") && mode_binding(&skill).is_none() {
++        return Err(Failure::new(
++            exit::USAGE,
++            format!("no mode in {skill:?} — expected mode:walk, mode:roller or mode:toggle"),
++        ));
++    }
++    if mode_binding(&skill).is_none()
++        && !skill.is_empty()
+         && let Some(known) = robot_skills(robot_socket)
+         && !known.contains(&skill)
+     {
+@@ -4842,6 +4852,15 @@ fn run_pad_bindings(
+ ///
+ /// From `robot.subscribe`'s acknowledgement, which is where a client learns what a robot can do
+ /// now that the set is config rather than five compiled-in names.
++/// `Some("walk"|"roller")` for a `mode:` binding — a pad button that switches the
++/// drive mode instead of running a skill (pad-map turns it into `robot.setMode`).
++fn mode_binding(skill: &str) -> Option<&str> {
++    match skill.strip_prefix("mode:") {
++        Some(mode @ ("walk" | "roller" | "toggle")) => Some(mode),
++        _ => None,
++    }
++}
++
+ fn robot_skills(robot_socket: &Path) -> Option<Vec<String>> {
+     let mut client = Client::connect_to("robotd", robot_socket).ok()?;
+     client.hello().ok()?;
+diff --git a/robotd-params/src/lib.rs b/robotd-params/src/lib.rs
+index 723fbb3..b24d1e0 100644
+--- a/robotd-params/src/lib.rs
++++ b/robotd-params/src/lib.rs
+@@ -262,6 +262,10 @@ impl Default for PadImuHeadControlParams {
+ /// A name here is not checked against anything at parse time: which skills exist is a property of
+ /// the robot, and `padd` learns it from `robot.subscribe`. An unknown name is refused by `robotd`
+ /// with the list it does know, which is a better error than a config file could give.
++///
++/// Modes are not skills: `mode:walk` and `mode:roller` make the button switch the drive mode
++/// (`robot.setMode`), e.g. `y = "mode:roller"` puts the wheels on Y, and `mode:toggle`
++/// switches to whichever mode is not running — the one-button form.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(deny_unknown_fields, default)]
+ pub struct PadParams {
+@@ -1759,9 +1763,13 @@ impl SetManifest {
+     /// `robotctl policy list`, and nothing invokes it unless somebody asks for it by that name.
+     /// Catching it would mean a hardcoded list of our own filenames, which is the coupling this
+     /// whole manifest exists to remove.
+-    pub fn skills(&self) -> impl Iterator<Item = &SetPolicy> {
++    ///
++    /// One mode's skills, not the set's: an entry belongs to the mode it is tagged with —
++    /// walking when untagged — and a walking-trained one-shot running on wheels is a fall.
++    pub fn skills(&self, mode: Mode) -> impl Iterator<Item = &SetPolicy> {
+         self.policies
+             .iter()
++            .filter(move |p| p.mode() == mode)
+             .filter(|p| p.is_zero_command_skill())
+             .filter(|p| !DAEMON_OWNED_SKILLS.contains(&p.skill_name().as_str()))
+     }
+@@ -1799,14 +1807,20 @@ pub fn set_manifest() -> Option<SetManifest> {
+ /// A board whose set predates the manifest keeps its kicks and its roulade with no config
+ /// written and no migration run, which is the whole reason absence resolves to something rather
+ /// than nothing. This goes when every tagged set carries one.
+-fn builtin_skills(manifest: Option<&SetManifest>) -> Vec<SkillDef> {
++fn builtin_skills(manifest: Option<&SetManifest>, mode: Mode) -> Vec<SkillDef> {
+     // What the set itself declares. A policy is a skill only if it says it is episodic, drives on
+     // a constant command, and how long it runs — a gait is not something to ask for by name, a
+     // perpetual one needs a hold length that only a person can choose, and a phase-encoded one
+     // is the ground pick.
+     if let Some(manifest) = manifest {
++        // A set that declares any skills speaks for every mode: a mode with none tagged gets an
++        // empty list, not the walking fallback.
++        let declares = manifest
++            .policies
++            .iter()
++            .any(|p| p.is_zero_command_skill() && !DAEMON_OWNED_SKILLS.contains(&p.skill_name().as_str()));
+         let from_set: Vec<SkillDef> = manifest
+-            .skills()
++            .skills(mode)
+             .filter_map(|p| {
+                 Some(SkillDef {
+                     name: p.skill_name(),
+@@ -1823,11 +1837,16 @@ fn builtin_skills(manifest: Option<&SetManifest>) -> Vec<SkillDef> {
+                 })
+             })
+             .collect();
+-        if !from_set.is_empty() {
++        if declares {
+             return from_set;
+         }
+     }
+ 
++    // The fallback three are walking-trained; wheels get none.
++    if mode == Mode::Roller {
++        return Vec::new();
++    }
++
+     fallback_skills()
+ }
+ 
+@@ -2022,7 +2041,7 @@ impl PolicyParams {
+     /// [`Self::resolved_skills`] against a manifest already read — or none, which is the
+     /// fallback three.
+     pub fn resolved_skills_with(&self, manifest: Option<&SetManifest>) -> Vec<SkillDef> {
+-        let mut resolved = builtin_skills(manifest);
++        let mut resolved = builtin_skills(manifest, self.mode);
+         for configured in &self.skills {
+             match resolved.iter_mut().find(|s| s.name == configured.name) {
+                 Some(builtin) => *builtin = configured.clone(),
+@@ -2112,8 +2131,9 @@ impl PolicyParams {
+                 Some("alpha_ground_pick.onnx"),
+             ),
+             // The prototype's roller preset, since rebased on the alpha defaults: roller
+-            // policy, crouch on the ground-pick trigger, and everything else — sit/stand,
+-            // kicks, the trained low-pass — as the walking mode has it. `stand` stays
++            // policy, crouch on the ground-pick trigger, and sit/stand plus the trained
++            // low-pass as walking mode has them. The walking-trained one-shots — kicks and
++            // the roulade — stay out: on wheels they tip the robot over. `stand` stays
+             // unloaded, deliberately: the prototype loads the standing network in roller
+             // mode and then skips every standing transition while `roller_mode` is set, so
+             // it never runs — not loading it is the same robot without the dead session.
+@@ -2908,7 +2928,7 @@ mod tests {
+         .unwrap();
+ 
+         let skills: Vec<(&str, f64)> = manifest
+-            .skills()
++            .skills(super::Mode::Walk)
+             .map(|p| (p.file.as_str(), p.duration_s.unwrap()))
+             .collect();
+         assert_eq!(
+@@ -2922,6 +2942,32 @@ mod tests {
+         );
+     }
+ 
++    /// **A skill belongs to its mode.** Untagged means walking, and a mode with nothing tagged
++    /// has no one-shots — a walking-trained trick on wheels is a fall, not a feature.
++    #[test]
++    fn a_set_manifests_skills_stay_in_their_mode() {
++        let manifest: super::SetManifest = serde_json::from_value(serde_json::json!({
++            "policies": [
++                { "file": "roulade.onnx", "kind": "episodic", "duration_s": 1.0 },
++                { "file": "wheelie.onnx", "kind": "episodic", "duration_s": 2.0,
++                  "mode": "roller" }
++            ]
++        }))
++        .unwrap();
++
++        let walk: Vec<String> = manifest
++            .skills(super::Mode::Walk)
++            .map(|p| p.skill_name())
++            .collect();
++        assert_eq!(walk, vec!["roulade".to_string()]);
++
++        let roller: Vec<String> = manifest
++            .skills(super::Mode::Roller)
++            .map(|p| p.skill_name())
++            .collect();
++        assert_eq!(roller, vec!["wheelie".to_string()]);
++    }
++
+     /// **A set cannot shadow a skill the daemon drives itself.**
+     ///
+     /// The manifest lives on the Hub, so nothing in this repository can check it before a board
+@@ -2952,7 +2998,10 @@ mod tests {
+         }))
+         .unwrap();
+ 
+-        let claimed: Vec<String> = manifest.skills().map(|p| p.skill_name()).collect();
++        let claimed: Vec<String> = manifest
++            .skills(super::Mode::Walk)
++            .map(|p| p.skill_name())
++            .collect();
+         assert_eq!(
+             claimed,
+             vec!["alpha_ground_pick".to_string(), "roulade".to_string()],
+@@ -3158,7 +3207,7 @@ mod tests {
+                 action_scale: None
+             })
+         );
+-        assert_eq!(set.skills().count(), 0, "not a zero-command skill");
++        assert_eq!(set.skills(super::Mode::Walk).count(), 0, "not a zero-command skill");
+         assert_eq!(
+             set.ground_pick(super::Mode::Roller),
+             None,
+@@ -4191,10 +4240,10 @@ mod tests {
+ 
+     /// One line — `mode = "roller"` — must reproduce the prototype's whole roller preset,
+     /// which its installer rebased on the alpha defaults: the roller policy and its tuning
+-    /// (kp 200, scale 0.8, the crouch on the ground-pick trigger at 3 s / 0.8), and
+-    /// everything else exactly as walking mode has it — sit/stand, kicks, roulade, the
+-    /// trained low-pass. Only the standing network stays out (the prototype loads it and
+-    /// then skips every standing transition in roller mode, so it never runs).
++    /// (kp 200, scale 0.8, the crouch on the ground-pick trigger at 3 s / 0.8), and sit/stand
++    /// plus the trained low-pass as walking mode has them. The walking-trained one-shots —
++    /// kicks and the roulade — stay out, as does the standing network (the prototype loads it
++    /// and then skips every standing transition in roller mode, so it never runs).
+     #[test]
+     fn roller_mode_resolves_to_the_prototype_roller_preset() {
+         let dir = tempfile::tempdir().unwrap();
+@@ -4214,19 +4263,9 @@ mod tests {
+                 .ends_with("alpha_sitstand.onnx"),
+             "the rebased roller line keeps the sit"
+         );
+-        assert!(
+-            p.kick_left
+-                .as_ref()
+-                .unwrap()
+-                .ends_with("ball_kick_left.onnx")
+-        );
+-        assert!(
+-            p.kick_right
+-                .as_ref()
+-                .unwrap()
+-                .ends_with("ball_kick_right.onnx")
+-        );
+-        assert!(p.roulade.as_ref().unwrap().ends_with("roulade.onnx"));
++        assert_eq!(p.kick_left, None, "walking-trained, not for wheels");
++        assert_eq!(p.kick_right, None, "walking-trained, not for wheels");
++        assert_eq!(p.roulade, None, "walking-trained, not for wheels");
+         assert!(
+             p.ground_pick
+                 .as_ref()
+diff --git a/robotd/src/leds.rs b/robotd/src/leds.rs
+index 39e5c0b..a028560 100644
+--- a/robotd/src/leds.rs
++++ b/robotd/src/leds.rs
+@@ -164,6 +164,17 @@ fn flashlight_lights(stored: Flashlight) -> [Light; 3] {
+     channels.map(Light::from)
+ }
+ 
++/// The status LED with the mode folded in: a healthy robot on wheels blinks green
++/// rather than holding it — the pad can switch modes with one button, and a duck
++/// about to roll away should not look like a walking one. Anything not healthy
++/// (degraded, fault, starting) keeps its own meaning in either mode.
++fn status_render(status: Status, mode: crate::params::Mode) -> [Light; 2] {
++    match (status, mode) {
++        (Status::Healthy, crate::params::Mode::Roller) => [Light::Blink, Light::Off],
++        _ => status.lights(),
++    }
++}
++
+ /// Whether this board has a flashlight. Read once at startup: an LED does not appear on a
+ /// running board.
+ pub fn flashlight_fitted() -> bool {
+@@ -243,8 +254,9 @@ pub async fn run(state: Arc<RobotState>) {
+             && !state.force_unhealthy;
+         let health = state.health();
+         gauge = gauge.next(health.battery.as_ref().map(|b| b.percent));
++        let mode = crate::mode_of(state.mode.load(Ordering::Relaxed));
+         face.show(
+-            Status::of(&health, starting).lights(),
++            status_render(Status::of(&health, starting), mode),
+             gauge.lights(),
+             flashlight_lights(state.flashlight.load(Ordering::Relaxed)),
+         );
+@@ -305,6 +317,24 @@ mod tests {
+         assert_eq!(Status::of(&health(false, false), false), Status::Fault);
+     }
+ 
++    #[test]
++    fn roller_mode_blinks_the_status_led_green() {
++        use crate::params::Mode;
++        assert_eq!(
++            status_render(Status::Healthy, Mode::Roller),
++            [Light::Blink, Light::Off]
++        );
++        assert_eq!(
++            status_render(Status::Healthy, Mode::Walk),
++            [Light::On, Light::Off]
++        );
++        // A fault keeps its own meaning in either mode.
++        assert_eq!(
++            status_render(Status::Fault, Mode::Roller),
++            [Light::Off, Light::On]
++        );
++    }
++
+     #[test]
+     fn the_flashlight_toggles_and_remembers_nothing_it_was_not_told() {
+         let toggle = |color| proto::FlashlightParams {
+diff --git a/robotd/src/main.rs b/robotd/src/main.rs
+index aa7ef51..3f26846 100644
+--- a/robotd/src/main.rs
++++ b/robotd/src/main.rs
+@@ -346,10 +346,13 @@ fn mode_of(code: u8) -> Mode {
+ ///
+ /// `None` in a skill slot doubles as "this robot cannot do that", which is what lets `dispatch`
+ /// refuse a `robot.do` for a skill this mode has no network for instead of queueing a request the
+-/// loop will drop — and roller mode is exactly that case: no standing network, a crouch where the
+-/// ground pick was.
++/// loop will drop — and roller mode is exactly that case: no standing network, none of the
++/// walking-trained one-shots, a crouch where the ground pick was.
+ #[derive(Debug, Clone, Default)]
+ struct PolicyNames {
++    /// Which mode these names belong to: the sit is refused on wheels though the network is
++    /// loaded, because sitting lowers a wheeled robot onto feet it balances on.
++    mode: Mode,
+     walk: Option<String>,
+     stand: Option<String>,
+     sitstand: Option<String>,
+@@ -367,6 +370,7 @@ impl PolicyNames {
+         }
+         let name = |path: &Option<std::path::PathBuf>| path.as_deref().and_then(file_name);
+         Self {
++            mode: policy.mode,
+             walk: file_name(&policy.walk),
+             stand: name(&policy.stand),
+             sitstand: name(&policy.sitstand),
+@@ -3142,6 +3146,10 @@ async fn control_loop<T: RobotIo>(
+         // Still: the policy has the robot, nothing asks it to move or is moving it, nobody has
+         // steered the head lately, and it is not singing (the chorale owns the head then).
+         let still = was_driving
++            // Walk mode only: on wheels the glance's head sweep is a balance
++            // disturbance the roller policy was never trained on — the duck
++            // looks fine while driving and falls seconds after stopping.
++            && policy_cfg.mode == Mode::Walk
+             && !in_limp_fall
+             && !pickup_paused
+             && twist_target == [0.0; 3]
+@@ -4636,7 +4644,7 @@ fn skills_report(state: &RobotState) -> proto::SkillsResult {
+                 names.skills.iter().all(|s| s != name)
+                     && match *name {
+                         "ground_pick" => names.ground_pick.is_some(),
+-                        _ => names.sitstand.is_some(),
++                        _ => names.sitstand.is_some() && names.mode == Mode::Walk,
+                     }
+             })
+             .map(str::to_owned)
+@@ -4860,14 +4868,25 @@ fn pad_bindings_report(config: &std::path::Path, state: &RobotState) -> proto::P
+                     skill: skill.to_owned(),
+                     overridden: Some(skill) != defaults.skill(button),
+                     // An empty binding is a button switched off on purpose, not a fault.
+-                    error: (!skill.is_empty() && !known.iter().any(|s| s == skill))
+-                        .then(|| format!("this robot has no skill called {skill:?}")),
++                    error: (!skill.is_empty()
++                        && mode_binding(skill).is_none()
++                        && !known.iter().any(|s| s == skill))
++                    .then(|| format!("this robot has no skill called {skill:?}")),
+                 })
+             })
+             .collect(),
+     }
+ }
+ 
++/// `Some("walk"|"roller")` for a `mode:` binding — a pad button that switches the
++/// drive mode instead of running a skill (pad-map turns it into `robot.setMode`).
++fn mode_binding(skill: &str) -> Option<&str> {
++    match skill.strip_prefix("mode:") {
++        Some(mode @ ("walk" | "roller" | "toggle")) => Some(mode),
++        _ => None,
++    }
++}
++
+ /// Put a skill on a button, or clear it.
+ ///
+ /// **Written to the config file, because there is nowhere else it could go.** `padd` re-reads
+@@ -4895,17 +4914,24 @@ fn bind_pad_request(p: &proto::PadBindParams, state: &RobotState) -> proto::Inte
+     };
+ 
+     if !wanted.is_empty() {
+-        let known = do_names(&state.policies.load());
+-        if !known.iter().any(|s| s == wanted) {
++        if wanted.starts_with("mode:") && mode_binding(wanted).is_none() {
+             return proto::IntentResult::refused(format!(
+-                "this robot has no skill called {wanted:?} — it has {}",
+-                if known.is_empty() {
+-                    "none".to_owned()
+-                } else {
+-                    known.join(", ")
+-                }
++                "no mode in {wanted:?} — expected mode:walk, mode:roller or mode:toggle"
+             ));
+         }
++        if mode_binding(wanted).is_none() {
++            let known = do_names(&state.policies.load());
++            if !known.iter().any(|s| s == wanted) {
++                return proto::IntentResult::refused(format!(
++                    "this robot has no skill called {wanted:?} — it has {}",
++                    if known.is_empty() {
++                        "none".to_owned()
++                    } else {
++                        known.join(", ")
++                    }
++                ));
++            }
++        }
+     }
+ 
+     let current = params::edit::pad_bindings(&state.config_path).unwrap_or_default();
+@@ -5056,13 +5082,14 @@ fn load_policy_request(
+ /// exactly what `pad.bindings` did until a test caught it.
+ ///
+ /// Both are conditional on the policy behind them being loaded, because a robot whose `sitstand`
+-/// slot is switched off genuinely cannot sit.
++/// slot is switched off genuinely cannot sit — and the sit is walk-mode's, because lowering a
++/// wheeled robot into the seat tips it over. The shutdown sit does not come through here.
+ fn do_names(policies: &PolicyNames) -> Vec<String> {
+     let mut names: Vec<String> = Vec::new();
+     if policies.ground_pick.is_some() {
+         names.push("ground_pick".to_owned());
+     }
+-    if policies.sitstand.is_some() {
++    if policies.sitstand.is_some() && policies.mode == Mode::Walk {
+         names.push("sit_toggle".to_owned());
+     }
+     names.extend(policies.skills.iter().cloned());
+@@ -5076,7 +5103,8 @@ fn queue_skill(state: &RobotState, intents: &Intents, skill: &str) -> bool {
+             intents.request_ground_pick();
+             true
+         }
+-        "sit_toggle" if policies.sitstand.is_some() => {
++        // Walk-mode only though the network loads in both: the seat drops a wheeled robot.
++        "sit_toggle" if policies.sitstand.is_some() && policies.mode == Mode::Walk => {
+             intents.request_sit_toggle();
+             true
+         }
+@@ -5265,10 +5293,19 @@ fn dispatch(
+             let target = match p.mode.as_str() {
+                 "walk" => Some(Mode::Walk),
+                 "roller" => Some(Mode::Roller),
++                // A pad button cannot name the opposite mode — it does not know
++                // which one is running — so "toggle" resolves here, where the
++                // current mode is known.
++                "toggle" => Some(match mode_of(state.mode.load(Ordering::Relaxed)) {
++                    Mode::Walk => Mode::Roller,
++                    Mode::Roller => Mode::Walk,
++                }),
+                 _ => None,
+             };
+             let result = match target {
+-                None => proto::IntentResult::refused("mode must be \"walk\" or \"roller\""),
++                None => proto::IntentResult::refused(
++                    "mode must be \"walk\", \"roller\" or \"toggle\"",
++                ),
+                 Some(_) if state.policies.load().walk.is_none() => proto::IntentResult::refused(
+                     "no policy on this robot, so there is nothing to switch between",
+                 ),
+@@ -5967,6 +6004,16 @@ mod tests {
+             ..Default::default()
+         });
+         assert_eq!(without, ["roulade"]);
++
++        // On wheels the sit is refused though the network is loaded — the seat drops a
++        // wheeled robot — and the crouch keeps the ground pick's name.
++        let rolling = do_names(&PolicyNames {
++            mode: Mode::Roller,
++            ground_pick: Some("roller_crouch.onnx".to_owned()),
++            sitstand: Some("alpha_sitstand.onnx".to_owned()),
++            ..Default::default()
++        });
++        assert_eq!(rolling, ["ground_pick"]);
+     }
+ 
+     /// **An unknown skill is refused with the list, before anything is written.**
+@@ -6020,6 +6067,46 @@ mod tests {
+         );
+     }
+ 
++    /// A `mode:` binding names a drive mode, not a skill: walk/roller pass without a skill
++    /// of that name, anything else is refused without touching the file.
++    #[test]
++    fn binding_a_mode_is_checked_against_the_modes_not_the_skills() {
++        let (_dir, state) = state_over("");
++
++        let ok = bind_pad_request(
++            &proto::PadBindParams {
++                button: "y".to_owned(),
++                skill: Some("mode:roller".to_owned()),
++            },
++            &state,
++        );
++        assert!(ok.accepted, "{ok:?}");
++        assert_eq!(
++            params::edit::pad_bindings(&state.config_path).unwrap().y,
++            "mode:roller"
++        );
++
++        let before = std::fs::read_to_string(state.config_path.clone()).expect("read");
++        let bad = bind_pad_request(
++            &proto::PadBindParams {
++                button: "y".to_owned(),
++                skill: Some("mode:fly".to_owned()),
++            },
++            &state,
++        );
++        assert!(!bad.accepted, "{bad:?}");
++        let reason = bad.reason.unwrap_or_default();
++        assert!(
++            reason.contains("mode:walk"),
++            "{reason}"
++        );
++        assert_eq!(
++            std::fs::read_to_string(&state.config_path).expect("read"),
++            before,
++            "nothing was written"
++        );
++    }
++
+     /// **An empty skill switches a button off; an absent one puts it back.** Two different
+     /// wishes, and neither may be spelled the way the other is — the same three-state field
+     /// `robot.loadPolicy` uses for a path.
+@@ -6334,6 +6421,14 @@ mod tests {
+         assert!(set("walk").accepted);
+         assert_eq!(intents.take_mode_switch(), Some(mode_code(Mode::Walk)));
+ 
++        // "toggle" resolves against the running mode: the default is walk, so the
++        // first toggle queues roller, and once the state says roller it queues walk.
++        assert!(set("toggle").accepted);
++        assert_eq!(intents.take_mode_switch(), Some(mode_code(Mode::Roller)));
++        s.mode.store(mode_code(Mode::Roller), Ordering::Relaxed);
++        assert!(set("toggle").accepted);
++        assert_eq!(intents.take_mode_switch(), Some(mode_code(Mode::Walk)));
++
+         let refused = set("hovercraft");
+         assert!(!refused.accepted);
+         let reason = refused.reason.unwrap_or_default();

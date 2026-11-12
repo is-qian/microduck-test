@@ -1,0 +1,7 @@
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+
+# Static musl build: the board image (bookworm, glibc 2.36) is older than
+# typical dev hosts, so the shipped binary must not depend on host glibc.
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"

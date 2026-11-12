@@ -1,0 +1,37 @@
+#!/bin/sh
+# robot-services start|stop — bring the whole daemon set up or down together.
+#
+# The set is read off the installed release: every unit carrying an
+# [Install] section, the same rule install.sh enables by, so a new daemon
+# is picked up without anyone editing this script. Hardware tests want the
+# motor bus, camera and radios free (stop); nobody should have to remember
+# eight unit names.
+set -eu
+
+case "${1:-}" in
+    start|stop) ;;
+    *) echo "usage: $0 start|stop" >&2; exit 2 ;;
+esac
+
+units() {
+    for unit in /opt/robot/daemon/current/systemd/*.service /opt/robot/daemon/current/systemd/*.timer; do
+        [ -f "$unit" ] || continue
+        grep -q '^WantedBy=' "$unit" || continue
+        basename "$unit"
+    done
+}
+
+all=$(units)
+rest=$(echo "$all" | grep -v '^robotd\.service$' || true)
+# robotd stops first (its clients see the bus go before it does) and starts
+# last (its clients come up against a bus that already answers).
+if [ "$1" = stop ]; then
+    list="robotd.service $rest"
+else
+    list="$rest robotd.service"
+fi
+
+for u in $list; do
+    systemctl "$1" "$u"
+done
+echo "daemon set $1: $(echo $all | tr '\n' ' ')"

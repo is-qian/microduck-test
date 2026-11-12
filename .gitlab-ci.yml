@@ -1,0 +1,77 @@
+# Manual-trigger only (Build > Run pipeline): cross-build every tool for
+# aarch64, pack the dist tarball and publish it as a release. The
+# armbian-build CI deploys the latest release into FULL images instead of
+# cloning this repo, so nothing compiles in the image chroot anymore.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_PIPELINE_SOURCE == "api"'
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+
+variables:
+  CI_HTTP_PROXY:
+    value: ""
+    description: Optional HTTP proxy, e.g. http://proxy.example:7890
+
+build-dist:
+  image: rust:1-bookworm
+  tags:
+    - x86-docker
+  variables:
+    CARGO_HOME: $CI_PROJECT_DIR/.cargo-home
+    # The runner's link to github.com drops connections; the git CLI and
+    # more retries ride it out.
+    CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    CARGO_NET_RETRY: "10"
+    # The runner's route to static.rust-lang.org drops too; fetch rust
+    # components from the rsproxy.cn mirror instead.
+    RUSTUP_DIST_SERVER: "https://rsproxy.cn"
+  cache:
+    key: cargo
+    paths:
+      - .cargo-home
+  script:
+    - |
+      if [ -n "${CI_HTTP_PROXY:-}" ]; then
+        export HTTP_PROXY="${CI_HTTP_PROXY}"
+        export HTTPS_PROXY="${CI_HTTP_PROXY}"
+        export http_proxy="${CI_HTTP_PROXY}"
+        export https_proxy="${CI_HTTP_PROXY}"
+        export NO_PROXY="localhost,127.0.0.1,${CI_SERVER_HOST}"
+        export no_proxy="${NO_PROXY}"
+      else
+        unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy
+      fi
+    - apt-get update -qq
+    - apt-get install -y -qq --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross zstd curl xz-utils
+    # board-bundle builds the daemon from source, the way upstream CI does:
+    # cargo zigbuild + zig, and the workspace's one C dependency needs the
+    # cross sysroot from the microduck repo's scripts/cross-sysroot.sh.
+    # zig comes from 00-ci-packages/ (vendored; the runner's route to
+    # ziglang.org keeps dropping). Its binary lands at /usr/local/zig,
+    # which is not on PATH.
+    - ln -sf /usr/local/zig /usr/local/bin/zig
+    - cargo install cargo-zigbuild --locked
+    - rustup target add aarch64-unknown-linux-musl
+    - rustup target add aarch64-unknown-linux-gnu
+    - ./build-dist.sh
+    - tag="dist-$(TZ=Asia/Shanghai date +%Y%m%d%H%M)-${CI_COMMIT_SHORT_SHA}"
+    - base="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/test-tools-dist/${tag}"
+    - >
+      curl --fail-with-body -H "JOB-TOKEN: ${CI_JOB_TOKEN}"
+      --upload-file test-tools-dist.tar.gz
+      "${base}/test-tools-dist.tar.gz"
+    - |
+      cat > release.json <<RELEASE_EOF
+      {
+        "name": "${tag}",
+        "tag_name": "${tag}",
+        "ref": "${CI_COMMIT_SHA}",
+        "description": "Prebuilt aarch64 test-tools dist (pipeline ${CI_PIPELINE_ID}); the armbian-build CI deploys this tarball into FULL images.",
+        "assets": { "links": [ { "name": "test-tools-dist.tar.gz", "url": "${base}/test-tools-dist.tar.gz", "link_type": "package" } ] }
+      }
+      RELEASE_EOF
+    - >
+      curl --fail-with-body -X POST -H "JOB-TOKEN: ${CI_JOB_TOKEN}"
+      -H "Content-Type: application/json" --data @release.json
+      "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases"

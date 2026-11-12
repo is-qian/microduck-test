@@ -1,0 +1,41 @@
+diff --git a/robotd-params/src/lib.rs b/robotd-params/src/lib.rs
+index 71007de..26f7cd2 100644
+--- a/robotd-params/src/lib.rs
++++ b/robotd-params/src/lib.rs
+@@ -287,9 +287,12 @@ impl Default for PadParams {
+             a: "sit_toggle".to_owned(),
+             b: "ground_pick".to_owned(),
+             x: String::new(),
+-            y: String::new(),
+-            lb: String::new(),
+-            rb: String::new(),
++            // Upstream ships these free; we preset the roulade and the kicks
++            // so a fresh robot rolls and kicks out of the box. On
++            // Nintendo-layout pads Y is the button labeled X.
++            y: "roulade".to_owned(),
++            lb: "kick_left".to_owned(),
++            rb: "kick_right".to_owned(),
+         }
+     }
+ }
+@@ -3163,16 +3166,16 @@ mod tests {
+         );
+     }
+ 
+-    /// The shipped mapping: A sits, B picks up, X, Y and the bumpers are free.
++    /// The shipped mapping: A sits, B picks up, Y rolls, the bumpers kick, X is free.
+     #[test]
+     fn the_default_bindings() {
+         let pad = super::PadParams::default();
+         assert_eq!(pad.a, "sit_toggle");
+         assert_eq!(pad.b, "ground_pick");
+         assert_eq!(pad.x, "");
+-        assert_eq!(pad.y, "");
+-        assert_eq!(pad.lb, "");
+-        assert_eq!(pad.rb, "");
++        assert_eq!(pad.y, "roulade");
++        assert_eq!(pad.lb, "kick_left");
++        assert_eq!(pad.rb, "kick_right");
+     }
+ 
+     /// **The D-pad stopped being bindable, and a robot still carrying the old key boots.** It is

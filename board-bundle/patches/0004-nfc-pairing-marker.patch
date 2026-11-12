@@ -1,0 +1,534 @@
+diff --git a/configd/src/bluez.rs b/configd/src/bluez.rs
+index 79328bb..a2d7949 100644
+--- a/configd/src/bluez.rs
++++ b/configd/src/bluez.rs
+@@ -601,8 +601,14 @@ impl BlueZ {
+     /// `Icon` — because those need a further exchange. A pad that never resolves any of them is
+     /// invisible to [`Snapshot::is_gamepad`], and a bare "no gamepad found" would leave someone with
+     /// no way to learn the address that `--mac` needs. So the refusal carries the list.
+-    async fn find(&self, mac: Option<&str>, timeout: Duration) -> PadResult<Found> {
++    async fn find(
++        &self,
++        mac: Option<&str>,
++        name: Option<&str>,
++        timeout: Duration,
++    ) -> PadResult<Found> {
+         let deadline = tokio::time::Instant::now() + timeout;
++        let sweep_start = tokio::time::Instant::now();
+         // When the first classified, unbonded candidate was seen, so the sweep can run
+         // [`SIBLING_GRACE`] past it before deciding.
+         let mut first_fresh: Option<tokio::time::Instant> = None;
+@@ -614,14 +620,26 @@ impl BlueZ {
+                     // An explicit address bypasses the heuristic entirely. That is the escape hatch
+                     // for hardware this does not recognise, and it must not be second-guessed.
+                     Some(wanted) => wanted.eq_ignore_ascii_case(&device.mac),
+-                    None => device.is_gamepad(),
++                    None => match name {
++                        // A name from a pairing tag is the same kind of explicit intent, on
++                        // top of the gamepad heuristic so a renamed phone cannot be bonded.
++                        Some(wanted) => {
++                            wanted.eq_ignore_ascii_case(&device.name) && device.is_gamepad()
++                        }
++                        None => device.is_gamepad(),
++                    },
+                 })
+                 .cloned()
+                 .collect();
+ 
+             let now = tokio::time::Instant::now();
+             let worth_stopping_for = match mac {
++                // An explicit address ends the sweep as soon as it appears, paired or not: the
++                // caller has named what they want and there is nothing to prefer.
+                 Some(_) => !matches.is_empty(),
++                // A name ends it on the same terms as no name at all: a tag's name matches every
++                // bonded pad of that name in BlueZ's cache, and stopping on one would re-bond the
++                // old pad while a second one sits in pairing mode.
+                 None => {
+                     if matches.iter().any(Snapshot::is_fresh_and_classified) {
+                         let since = *first_fresh.get_or_insert(now);
+@@ -631,7 +649,21 @@ impl BlueZ {
+                     }
+                 }
+             };
++            if first_fresh == Some(now) {
++                let fresh: Vec<String> = matches
++                    .iter()
++                    .filter(|m| m.is_fresh_and_classified())
++                    .map(|m| format!("{} ({})", m.mac, m.name))
++                    .collect();
++                tracing::info!(elapsed = ?sweep_start.elapsed(), pads = ?fresh, "fresh pad on the air");
++            }
+             if worth_stopping_for || now >= deadline {
++                tracing::info!(
++                    elapsed = ?sweep_start.elapsed(),
++                    matched = matches.len(),
++                    early = worth_stopping_for,
++                    "sweep done"
++                );
+                 return Ok(Found { matches, seen });
+             }
+             tokio::time::sleep(DISCOVERY_POLL.min(deadline - tokio::time::Instant::now())).await;
+@@ -750,9 +782,10 @@ impl BlueZ {
+             // `Pair()` on BR/EDR is synchronous and answers when the bond is done — but it is still
+             // raced against `Paired`, as below, because that property is the ground truth and the
+             // reply is only one way to learn it.
++            let bond_start = tokio::time::Instant::now();
+             let paired = tokio::select! {
+                 outcome = tokio::time::timeout(BOND_TIMEOUT, proxy.pair()) => match outcome {
+-                    Ok(Ok(())) => { tracing::info!("bonded (classic)"); true }
++                    Ok(Ok(())) => { tracing::info!(elapsed = ?bond_start.elapsed(), "bonded (classic)"); true }
+                     Ok(Err(e)) if is_already_paired(&e) => { tracing::info!("already bonded"); true }
+                     Ok(Err(e)) => return Err((proto::PadPairFailure::Rejected, e.to_string())),
+                     Err(_) => false,
+@@ -772,8 +805,9 @@ impl BlueZ {
+             // pairing that succeeded. Logged at warn rather than info, though, because a classic
+             // pad that bonded and will not connect is the "connected light, no input" state from
+             // the other order, and worth a line in the journal.
++            let connect_start = tokio::time::Instant::now();
+             match tokio::time::timeout(BOND_TIMEOUT, proxy.connect()).await {
+-                Ok(Ok(())) => tracing::info!("connected"),
++                Ok(Ok(())) => tracing::info!(elapsed = ?connect_start.elapsed(), "connected"),
+                 Ok(Err(e)) => tracing::warn!(error = %e, "bonded but not connected yet"),
+                 Err(_) => tracing::warn!("bonded; connect did not answer in time"),
+             }
+@@ -943,7 +977,12 @@ impl Pads for BlueZ {
+         Ok(pads)
+     }
+ 
+-    async fn pair(&self, mac: Option<&str>, timeout: Duration) -> PadResult<proto::PadPairResult> {
++    async fn pair(
++        &self,
++        mac: Option<&str>,
++        name: Option<&str>,
++        timeout: Duration,
++    ) -> PadResult<proto::PadPairResult> {
+         let _one_at_a_time = self.pairing.lock().await;
+ 
+         let Some(adapter) = self.adapter().await? else {
+@@ -974,7 +1013,7 @@ impl Pads for BlueZ {
+             .map_err(|e| format!("cannot start Bluetooth discovery: {e}"))?;
+         tracing::info!(?timeout, "looking for a gamepad in pairing mode");
+ 
+-        let found = self.find(mac, timeout).await;
++        let found = self.find(mac, name, timeout).await;
+ 
+         // Stop discovery before connecting, always — including on the error path, so a failed
+         // search does not leave the adapter scanning.
+diff --git a/configd/src/main.rs b/configd/src/main.rs
+index 1795919..88e54d1 100644
+--- a/configd/src/main.rs
++++ b/configd/src/main.rs
+@@ -574,8 +574,14 @@ async fn dispatch(
+         },
+         proto::Call::PadPair(params) => {
+             let timeout = pad::pair_timeout(params.timeout_seconds);
+-            tracing::info!(mac = ?params.mac, ?timeout, "pairing a gamepad");
+-            reply(id, service.pads.pair(params.mac.as_deref(), timeout).await)
++            tracing::info!(mac = ?params.mac, name = ?params.name, ?timeout, "pairing a gamepad");
++            reply(
++                id,
++                service
++                    .pads
++                    .pair(params.mac.as_deref(), params.name.as_deref(), timeout)
++                    .await,
++            )
+         }
+         proto::Call::PadForget(params) => reply(id, service.pads.forget(&params.mac).await),
+ 
+diff --git a/configd/src/pad.rs b/configd/src/pad.rs
+index fc37984..5e3526e 100644
+--- a/configd/src/pad.rs
++++ b/configd/src/pad.rs
+@@ -51,13 +51,18 @@ pub trait Pads: Send + Sync {
+     /// Every pad this robot is bonded to, connected first.
+     async fn status(&self) -> PadResult<Vec<proto::Pad>>;
+ 
+-    /// Pair whatever pad is in pairing mode, or the one at `mac`.
++    /// Pair whatever pad is in pairing mode, or the one at `mac`, or the one advertising `name`.
+     ///
+     /// A *refusal* — nothing found, two candidates, BlueZ said no — is an `Ok` carrying
+     /// [`proto::PadPairResult::Failed`]. `Err` is reserved for the machinery being broken, which is
+     /// the same split [`crate::net::Net`] uses and the same one the dispatcher turns into either a
+     /// result or an `INTERNAL_ERROR`.
+-    async fn pair(&self, mac: Option<&str>, timeout: Duration) -> PadResult<proto::PadPairResult>;
++    async fn pair(
++        &self,
++        mac: Option<&str>,
++        name: Option<&str>,
++        timeout: Duration,
++    ) -> PadResult<proto::PadPairResult>;
+ 
+     /// Drop the bond, so this pad stops reconnecting.
+     async fn forget(&self, mac: &str) -> PadResult<proto::PadForgetResult>;
+@@ -275,13 +280,19 @@ impl Pads for FakePads {
+             .collect())
+     }
+ 
+-    async fn pair(&self, mac: Option<&str>, _timeout: Duration) -> PadResult<proto::PadPairResult> {
++    async fn pair(
++        &self,
++        mac: Option<&str>,
++        name: Option<&str>,
++        _timeout: Duration,
++    ) -> PadResult<proto::PadPairResult> {
+         let mut state = self.inner.lock().await;
+ 
+         let candidates: Vec<proto::Pad> = state
+             .visible
+             .iter()
+             .filter(|pad| mac.is_none_or(|wanted| wanted.eq_ignore_ascii_case(&pad.mac)))
++            .filter(|pad| name.is_none_or(|wanted| wanted.eq_ignore_ascii_case(&pad.name)))
+             .cloned()
+             .collect();
+ 
+@@ -421,7 +432,7 @@ mod tests {
+         let pads = FakePads::new();
+         assert!(pads.status().await.unwrap().is_empty());
+ 
+-        let result = pads.pair(None, DEFAULT_PAIR_TIMEOUT).await.unwrap();
++        let result = pads.pair(None, None, DEFAULT_PAIR_TIMEOUT).await.unwrap();
+         let proto::PadPairResult::Paired { pad } = result else {
+             panic!("{result:?}");
+         };
+@@ -442,7 +453,7 @@ mod tests {
+     async fn an_absent_pad_is_not_found_rather_than_an_error() {
+         let pads = FakePads::with(Vec::new());
+         assert!(matches!(
+-            pads.pair(None, DEFAULT_PAIR_TIMEOUT).await.unwrap(),
++            pads.pair(None, None, DEFAULT_PAIR_TIMEOUT).await.unwrap(),
+             proto::PadPairResult::Failed {
+                 reason: proto::PadPairFailure::NotFound,
+                 ..
+@@ -463,7 +474,7 @@ mod tests {
+             unpaired("AA:BB:CC:11:00:03", "DualSense Wireless Controller"),
+         ]);
+ 
+-        let result = pads.pair(None, DEFAULT_PAIR_TIMEOUT).await.unwrap();
++        let result = pads.pair(None, None, DEFAULT_PAIR_TIMEOUT).await.unwrap();
+         let proto::PadPairResult::Paired { pad } = result else {
+             panic!("{result:?}");
+         };
+@@ -482,7 +493,7 @@ mod tests {
+         untrusted.trusted = false;
+         let pads = FakePads::with(vec![untrusted]);
+ 
+-        let result = pads.pair(None, DEFAULT_PAIR_TIMEOUT).await.unwrap();
++        let result = pads.pair(None, None, DEFAULT_PAIR_TIMEOUT).await.unwrap();
+         let proto::PadPairResult::Paired { pad } = result else {
+             panic!("{result:?}");
+         };
+@@ -500,7 +511,7 @@ mod tests {
+         ]);
+ 
+         assert!(matches!(
+-            pads.pair(None, DEFAULT_PAIR_TIMEOUT).await.unwrap(),
++            pads.pair(None, None, DEFAULT_PAIR_TIMEOUT).await.unwrap(),
+             proto::PadPairResult::Failed {
+                 reason: proto::PadPairFailure::Ambiguous,
+                 ..
+@@ -509,7 +520,7 @@ mod tests {
+ 
+         // And naming one resolves it, which is what the refusal tells the caller to do.
+         let result = pads
+-            .pair(Some("aa:bb:cc:11:00:03"), DEFAULT_PAIR_TIMEOUT)
++            .pair(Some("aa:bb:cc:11:00:03"), None, DEFAULT_PAIR_TIMEOUT)
+             .await
+             .unwrap();
+         let proto::PadPairResult::Paired { pad } = result else {
+diff --git a/duck-ipc-proto/src/lib.rs b/duck-ipc-proto/src/lib.rs
+index f64c7e1..d8af12d 100644
+--- a/duck-ipc-proto/src/lib.rs
++++ b/duck-ipc-proto/src/lib.rs
+@@ -1950,6 +1950,7 @@ pub mod test_support {
+             Call::PadStatus,
+             Call::PadPair(PadPairParams {
+                 mac: Some("AA:BB:CC:11:00:01".into()),
++                name: None,
+                 timeout_seconds: Some(20),
+             }),
+             Call::PadForget(PadForgetParams {
+@@ -3223,6 +3224,11 @@ pub struct PadPairParams {
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub mac: Option<String>,
+ 
++    /// Which pad, when several could answer: the name it advertises, matched case-insensitively.
++    /// What an NFC pairing tag asks for when it carries no address — `Pro Controller`, say.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub name: Option<String>,
++
+     /// How long to look, in seconds. `None` means the service's own default.
+     ///
+     /// A parameter because the caller knows something the robot does not: whoever typed this is
+diff --git a/nfc/src/main.rs b/nfc/src/main.rs
+index 21b61e3..2bb15fa 100644
+--- a/nfc/src/main.rs
++++ b/nfc/src/main.rs
+@@ -3,7 +3,9 @@
+ //! ## What it does
+ //!
+ //! Polls the reader five times a second. When a tag arrives, the first Bluetooth address in its
+-//! NDEF is taken as a pad's: if a pad is already connected nothing happens, otherwise `configd` is
++//! NDEF is taken as a pad's — or, for a tag holding the `microduck_gamepad_pairing` marker, the
++//! pad in pairing mode advertising the marker's name (a Pro Controller when it names no other).
++//! If a pad is already connected nothing happens, otherwise `configd` is
+ //! asked to pair that one — with a quack from `robotd` when the tag is read and a different sound
+ //! once the pad is paired. The rule and why it is that rule are
+ //! in [`nfc::pairing`].
+@@ -44,9 +46,14 @@ use nfc::{Error, ndef, tag};
+ const RETRY_MIN: Duration = Duration::from_secs(2);
+ const RETRY_MAX: Duration = Duration::from_secs(30);
+ 
+-/// How long `pad.pair` may take to answer. `configd` looks for 15 s by default and then says so;
+-/// this only has to outlast that, so a wedged `configd` does not stop the reader for good.
+-const PAIR_ANSWER: Duration = Duration::from_secs(40);
++/// How long a tag-triggered pairing looks for the pad. A pad's own pairing window is about a
++/// minute, and the tag may be touched before the pad's Sync button is — the scan has to outlast
++/// both.
++const PAIR_WINDOW: Duration = Duration::from_secs(60);
++
++/// How long `pad.pair` may take to answer: the scan window plus the bonding it then does. A
++/// wedged `configd` must not stop the reader for good, so this is finite.
++const PAIR_ANSWER: Duration = Duration::from_secs(90);
+ const QUICK_ANSWER: Duration = Duration::from_secs(5);
+ 
+ #[derive(Parser, Debug)]
+@@ -226,16 +233,16 @@ fn watch(chip: &mut Chip, period: Duration, robot: &mut dyn Robot) -> Error {
+                     touches.unread();
+                 }
+                 Ok(Err(why)) => tracing::warn!(tag = %id, %why, "tag holds no readable NDEF"),
+-                Ok(Ok(records)) => match ndef::mac_in(&records) {
+-                    None => tracing::warn!(tag = %id, ?records, "tag carries no Bluetooth address"),
+-                    Some(mac) => {
++                Ok(Ok(records)) => match ndef::pair_request_in(&records) {
++                    None => tracing::warn!(tag = %id, ?records, "tag asks for no pairing"),
++                    Some(request) => {
+                         // Off while the pairing blocks: no reason to power the antenna for the
+                         // fifteen seconds nobody is reading it.
+                         if let Err(e) = chip.field_off() {
+                             return e;
+                         }
+-                        tracing::warn!(tag = %id, %mac, "tag touched");
+-                        report(&mac, pairing::on_touch(robot, &mac));
++                        tracing::warn!(tag = %id, ?request, "tag touched");
++                        report(&format!("{request:?}"), pairing::on_touch(robot, &request));
+                     }
+                 },
+             }
+@@ -290,10 +297,15 @@ impl Robot for Sockets {
+         Ok(status.pads)
+     }
+ 
+-    fn pair(&mut self, mac: &str) -> Result<proto::PadPairResult, String> {
++    fn pair(
++        &mut self,
++        mac: Option<&str>,
++        name: Option<&str>,
++    ) -> Result<proto::PadPairResult, String> {
+         let params = proto::PadPairParams {
+-            mac: Some(mac.to_owned()),
+-            timeout_seconds: None,
++            mac: mac.map(str::to_owned),
++            name: name.map(str::to_owned),
++            timeout_seconds: Some(PAIR_WINDOW.as_secs() as u32),
+         };
+         call(&self.config, &proto::Call::PadPair(params), PAIR_ANSWER)
+     }
+diff --git a/nfc/src/ndef.rs b/nfc/src/ndef.rs
+index 048b7db..52f4e56 100644
+--- a/nfc/src/ndef.rs
++++ b/nfc/src/ndef.rs
+@@ -172,6 +172,40 @@ fn message(data: &[u8]) -> Result<&[u8], String> {
+ 
+ /// The first Bluetooth address in these records, as `AA:BB:CC:DD:EE:FF`.
+ ///
++/// What a tag asks the robot to pair.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub enum PairRequest {
++    /// The pad at this Bluetooth address.
++    Address(String),
++    /// The pad in pairing mode advertising this name — what the fixed marker asks for.
++    Name(String),
++}
++
++/// The fixed text of a pairing tag that names no address: `microduck_gamepad_pairing`, alone or
++/// with the pad's advertised name after a colon. A bare marker asks for a Pro Controller, the
++/// pad this scheme exists for.
++pub const PAIRING_MARKER: &str = "microduck_gamepad_pairing";
++const MARKER_DEFAULT_NAME: &str = "Pro Controller";
++
++/// The pairing request a tag carries: an address when one is written in it, else the marker's.
++pub fn pair_request_in(records: &[Record]) -> Option<PairRequest> {
++    if let Some(mac) = mac_in(records) {
++        return Some(PairRequest::Address(mac));
++    }
++    records.iter().find_map(|record| {
++        let rest = record.value().trim().strip_prefix(PAIRING_MARKER)?;
++        match rest.strip_prefix(':') {
++            // `microduck_gamepad_pairing:8BitDo` pairs whatever name follows the colon.
++            Some(name) if !name.trim().is_empty() => {
++                Some(PairRequest::Name(name.trim().to_owned()))
++            }
++            Some(_) => None,
++            None if rest.is_empty() => Some(PairRequest::Name(MARKER_DEFAULT_NAME.to_owned())),
++            None => None,
++        }
++    })
++}
++
+ /// Written by a person, so spelled however they like: `:` or `-` between the octets or nothing,
+ /// either case, inside other text. Twelve hex digits with a separator used consistently, and
+ /// not part of a longer run of hex — which is what keeps a serial number from reading as one.
+@@ -226,6 +260,27 @@ mod tests {
+         assert_eq!(records, vec![Record::Text("AA:BB:CC:11:00:02".into())]);
+     }
+ 
++    /// The marker pairs by name — a bare one a Pro Controller, a colon any advertised name — and
++    /// an address in the tag still wins, so an old tag keeps working.
++    #[test]
++    fn the_pairing_marker_names_a_pad() {
++        let request = |text: &str| pair_request_in(&parse(&text_tag(text)).unwrap());
++        assert_eq!(
++            request("microduck_gamepad_pairing"),
++            Some(PairRequest::Name("Pro Controller".into()))
++        );
++        assert_eq!(
++            request("microduck_gamepad_pairing:8BitDo Pro 2"),
++            Some(PairRequest::Name("8BitDo Pro 2".into()))
++        );
++        assert_eq!(
++            request("AA:BB:CC:11:00:02"),
++            Some(PairRequest::Address("AA:BB:CC:11:00:02".into()))
++        );
++        assert_eq!(request("microduck_gamepad_pairing_extra"), None);
++        assert_eq!(request("microduck_gamepad_pairing:"), None);
++    }
++
+     #[test]
+     fn a_uri_record_gets_its_prefix_back() {
+         let data = [TLV_NDEF, 7, 0xD1, 1, 3, b'U', 4, b'a', b'b', TLV_TERMINATOR];
+diff --git a/nfc/src/pairing.rs b/nfc/src/pairing.rs
+index 354da23..9030c0c 100644
+--- a/nfc/src/pairing.rs
++++ b/nfc/src/pairing.rs
+@@ -3,9 +3,10 @@
+ //! The rule, in full:
+ //!  - a pad already **connected** means nothing happens. The robot has a driver, and a tag brushed
+ //!    against it must not hand the bond to someone else's pad;
+-//!  - otherwise the robot quacks to say it read the tag, pairs the pad at the tag's address, and
+-//!    greets once it has — two different sounds, so someone holding the pad hears the difference
+-//!    between "got your tag, pairing" and "done". A refusal gets no second sound.
++//!  - otherwise the robot quacks to say it read the tag, pairs the pad the tag asks for — by
++//!    address, or by advertised name when the tag carries the pairing marker — and greets once it
++//!    has: two different sounds, so someone holding the pad hears the difference between "got your
++//!    tag, pairing" and "done". A refusal gets no second sound.
+ //!
+ //! The pad still has to be in pairing mode when the tag is touched — Sync on an Xbox pad, until
+ //! the light flashes fast. The tag says *which* pad; it cannot wake one up.
+@@ -66,7 +67,11 @@ impl Touches {
+ /// The rest of the robot, as far as a tag is concerned.
+ pub trait Robot {
+     fn pads(&mut self) -> Result<Vec<proto::Pad>, String>;
+-    fn pair(&mut self, mac: &str) -> Result<proto::PadPairResult, String>;
++    fn pair(
++        &mut self,
++        mac: Option<&str>,
++        name: Option<&str>,
++    ) -> Result<proto::PadPairResult, String>;
+     fn sound(&mut self, tag: proto::SoundTag) -> Result<(), String>;
+ }
+ 
+@@ -84,7 +89,7 @@ pub enum Outcome {
+     Failed(String),
+ }
+ 
+-pub fn on_touch(robot: &mut dyn Robot, mac: &str) -> Outcome {
++pub fn on_touch(robot: &mut dyn Robot, request: &crate::ndef::PairRequest) -> Outcome {
+     let pads = match robot.pads() {
+         Ok(pads) => pads,
+         Err(e) => return Outcome::Failed(format!("pad.status: {e}")),
+@@ -97,7 +102,11 @@ pub fn on_touch(robot: &mut dyn Robot, mac: &str) -> Outcome {
+     if let Err(why) = robot.sound(HEARD) {
+         tracing::info!(%why, "the robot would not quack for the tag");
+     }
+-    match robot.pair(mac) {
++    let (mac, name) = match request {
++        crate::ndef::PairRequest::Address(mac) => (Some(mac.as_str()), None),
++        crate::ndef::PairRequest::Name(name) => (None, Some(name.as_str())),
++    };
++    match robot.pair(mac, name) {
+         Err(e) => Outcome::Failed(format!("pad.pair: {e}")),
+         Ok(proto::PadPairResult::Failed { reason, detail }) => Outcome::NotPaired(reason, detail),
+         Ok(proto::PadPairResult::Paired { pad }) => match robot.sound(PAIRED) {
+@@ -133,15 +142,20 @@ mod tests {
+             self.calls.push("status".into());
+             Ok(self.pads.clone())
+         }
+-        fn pair(&mut self, mac: &str) -> Result<proto::PadPairResult, String> {
+-            self.calls.push(format!("pair {mac}"));
++        fn pair(
++            &mut self,
++            mac: Option<&str>,
++            name: Option<&str>,
++        ) -> Result<proto::PadPairResult, String> {
++            let wanted = mac.or(name).unwrap();
++            self.calls.push(format!("pair {wanted}"));
+             Ok(match self.refuse {
+                 Some(reason) => proto::PadPairResult::Failed {
+                     reason,
+                     detail: None,
+                 },
+                 None => proto::PadPairResult::Paired {
+-                    pad: pad(mac, true),
++                    pad: pad(wanted, true),
+                 },
+             })
+         }
+@@ -153,13 +167,17 @@ mod tests {
+ 
+     const MAC: &str = "AA:BB:CC:11:00:02";
+ 
++    fn address(mac: &str) -> crate::ndef::PairRequest {
++        crate::ndef::PairRequest::Address(mac.into())
++    }
++
+     #[test]
+     fn a_connected_pad_means_nothing_is_asked() {
+         let mut robot = Fake {
+             pads: vec![pad("AA:BB:CC:DD:EE:FF", true)],
+             ..Fake::default()
+         };
+-        let outcome = on_touch(&mut robot, MAC);
++        let outcome = on_touch(&mut robot, &address(MAC));
+         assert!(matches!(outcome, Outcome::AlreadyConnected(p) if p.mac == "AA:BB:CC:DD:EE:FF"));
+         assert_eq!(robot.calls, ["status"]);
+     }
+@@ -171,7 +189,7 @@ mod tests {
+             pads: vec![pad("AA:BB:CC:DD:EE:FF", false)],
+             ..Fake::default()
+         };
+-        assert!(matches!(on_touch(&mut robot, MAC), Outcome::Paired(p) if p.mac == MAC));
++        assert!(matches!(on_touch(&mut robot, &address(MAC)), Outcome::Paired(p) if p.mac == MAC));
+         assert_eq!(
+             robot.calls,
+             ["status", "chirp", format!("pair {MAC}").as_str(), "greet"]
+@@ -185,7 +203,7 @@ mod tests {
+             ..Fake::default()
+         };
+         assert_eq!(
+-            on_touch(&mut robot, MAC),
++            on_touch(&mut robot, &address(MAC)),
+             Outcome::NotPaired(proto::PadPairFailure::NotFound, None)
+         );
+         assert_eq!(
+diff --git a/robotctl/src/main.rs b/robotctl/src/main.rs
+index d5bd43e..1881d5c 100644
+--- a/robotctl/src/main.rs
++++ b/robotctl/src/main.rs
+@@ -4882,6 +4882,7 @@ fn run_pad(socket: &Path, config: &Path, command: PadCommand) -> Result<(), Fail
+         PadCommand::Pair { mac, timeout, json } => (
+             proto::Call::PadPair(proto::PadPairParams {
+                 mac: mac.clone(),
++                name: None,
+                 timeout_seconds: *timeout,
+             }),
+             *json,

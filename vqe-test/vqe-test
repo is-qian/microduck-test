@@ -1,0 +1,13 @@
+#!/bin/sh
+# usage: sudo vqe-test in_mono16k.wav out.wav [config.json]
+# Offline VQE (ANR+AGC) on a 16k mono s16 wav. Fakes
+# /proc/device-tree/compatible around the run: the lib's SoC whitelist
+# only accepts rockchip,rv1126b.
+DIR=$(cd "$(dirname "$0")" && pwd)
+[ "$(id -u)" = 0 ] || { echo "run with sudo"; exit 1; }
+[ $# -ge 2 ] || { echo "usage: sudo vqe-test in_mono16k.wav out.wav [config.json]"; exit 1; }
+CONF=${3:-$DIR/config_mic.json}
+printf 'rockchip,rv1126b\0' > /tmp/.vqe-compat
+mount --bind /tmp/.vqe-compat /proc/device-tree/compatible
+trap 'umount /proc/device-tree/compatible' EXIT INT TERM
+LD_LIBRARY_PATH=$DIR $DIR/vqe_test "$1" "$2" "$CONF" 2>&1 | grep -v '^LOG'

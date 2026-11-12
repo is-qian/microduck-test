@@ -1,0 +1,20 @@
+[package]
+name = "vqe-test"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "vqe"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vqe_test"
+path = "src/bin/vqe_test.rs"
+
+[[bin]]
+name = "vqe_live"
+path = "src/bin/vqe_live.rs"
+
+[profile.release]
+strip = true
+lto = true
