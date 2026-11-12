@@ -5,7 +5,3 @@
 /dxl/dxl
 vqe-test/out/
 vqe-test/target/
-# large artifacts, not hosted here
-/00-ci-packages/*.tar.xz
-/hwtest/bbno.wav
-/rockchip-test/npu2/model/**/*.rknn
